@@ -18,7 +18,7 @@ abstract class ProxyElement extends BuildableElement {
   Component build() => component.child;
 
   @override
-  void update(Component newComponent) {
+  void update(covariant Component newComponent) {
     final oldComponent = component;
     super.update(newComponent);
     assert(component == newComponent);

@@ -530,6 +530,9 @@ class TerminalBinding extends NoctermBinding
     if (_shouldExit) return;
     _shouldExit = true;
 
+    // Must happen before any subscription cancels — see [_restoreRawMode].
+    _restoreRawMode();
+
     // Cancel all subscriptions immediately
     pendingFrameTimer?.cancel();
     _inputSubscription?.cancel();
@@ -564,33 +567,7 @@ class TerminalBinding extends NoctermBinding
     } catch (_) {}
 
     // Perform terminal cleanup synchronously
-    try {
-      // IMPORTANT: Disable mouse tracking BEFORE leaving alternate screen
-      terminal.backend.writeRaw('\x1B[?1003l'); // Disable all motion tracking
-      terminal.backend.writeRaw('\x1B[?1006l'); // Disable SGR mouse mode
-      terminal.backend.writeRaw('\x1B[?1002l'); // Disable button event tracking
-      terminal.backend.writeRaw('\x1B[?1000l'); // Disable basic mouse tracking
-      // Pop kitty keyboard mode and reset modifyOtherKeys
-      terminal.backend.writeRaw(EscapeCodes.disable.kittyKeyboard);
-      terminal.backend.writeRaw(EscapeCodes.disable.modifyOtherKeys);
-      terminal.restoreColors(); // Restore terminal colors
-      terminal.flush();
-
-      // Restore terminal
-      terminal.showCursor();
-      terminal.leaveAlternateScreen();
-      terminal.clear();
-    } catch (_) {
-      // Ignore any errors during cleanup
-    }
-
-    // Restore terminal mode in its own try-catch to ensure it runs
-    // even if writing escape codes above fails
-    try {
-      terminal.backend.disableRawMode();
-    } catch (_) {
-      // Ignore errors when running without a proper terminal
-    }
+    _restoreTerminalState();
   }
 
   /// Handle global debug key combinations.
@@ -843,6 +820,10 @@ class TerminalBinding extends NoctermBinding
     if (_shouldExit) return;
 
     _shouldExit = true;
+
+    // Must happen before any subscription cancels — see [_restoreRawMode].
+    _restoreRawMode();
+
     _inputSubscription?.cancel();
     _resizeSubscription?.cancel();
 
@@ -869,6 +850,30 @@ class TerminalBinding extends NoctermBinding
     // Stop hot reload if it was initialized
     shutdownWithHotReload();
 
+    _restoreTerminalState();
+  }
+
+  /// Restore the terminal's termios state (ICANON + ECHO).
+  ///
+  /// **MUST be called before cancelling any stdin subscription.** On Linux,
+  /// cancelling a stdin subscription invalidates Dart's internal stdin
+  /// handle, and any subsequent `stdin.echoMode`/`lineMode` setter throws
+  /// `StdinException: Bad file descriptor` (EBADF). `disableRawMode`'s own
+  /// try/catch would swallow the error silently, leaving the user's shell
+  /// in raw mode — characters don't echo, Enter doesn't submit, terminal
+  /// appears dead.
+  void _restoreRawMode() {
+    try {
+      terminal.backend.disableRawMode();
+    } catch (_) {
+      // Ignore errors when running without a proper terminal
+    }
+  }
+
+  /// Shared terminal-state restoration, used by both the graceful [shutdown]
+  /// and the signal-driven [_performImmediateShutdown] so the two paths
+  /// cannot drift out of parity.
+  void _restoreTerminalState() {
     // Try to cleanup terminal, but handle errors gracefully
     try {
       // IMPORTANT: Disable mouse tracking and bracketed paste BEFORE leaving alternate screen
@@ -881,6 +886,9 @@ class TerminalBinding extends NoctermBinding
       // Pop kitty keyboard mode and reset modifyOtherKeys
       terminal.backend.writeRaw(EscapeCodes.disable.kittyKeyboard);
       terminal.backend.writeRaw(EscapeCodes.disable.modifyOtherKeys);
+
+      // Restore terminal colors
+      terminal.restoreColors();
 
       // Restore terminal (this includes leaving alternate screen)
       terminal.showCursor();
@@ -901,13 +909,6 @@ class TerminalBinding extends NoctermBinding
       // If backend is already closed, we can't write to it
       // This can happen during signal-based shutdown
       // The important thing is we tried to cleanup
-    }
-
-    // Restore raw mode via backend
-    try {
-      terminal.backend.disableRawMode();
-    } catch (e) {
-      // Ignore errors when running without a proper terminal
     }
   }
 

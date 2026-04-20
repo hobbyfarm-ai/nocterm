@@ -175,8 +175,11 @@ class Terminal {
 
   /// Restore terminal colors to defaults
   void restoreColors() {
-    backend.writeRaw('\x1b]110'); // foreground
-    backend.writeRaw('\x1b]111'); // background
+    // OSC sequences must be terminated with BEL (\x07) or ST. Without the
+    // terminator, strict terminal parsers stay in OSC-string mode and swallow
+    // subsequent output until they see one.
+    backend.writeRaw('\x1b]110\x07'); // foreground
+    backend.writeRaw('\x1b]111\x07'); // background
   }
 
   void reset() {
