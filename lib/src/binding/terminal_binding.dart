@@ -988,58 +988,83 @@ class TerminalBinding extends NoctermBinding
     _renderFullDiff(buffer, previous);
   }
 
-  /// Full buffer diff - compare every cell.
+  /// Returns true when the style would actually change terminal output.
+  ///
+  /// Mirrors the inline check used historically in `_renderFullDiff` and
+  /// `_renderFull`. Note: this preserves the existing convention of
+  /// considering only `hasUnderline` for decorations, even though
+  /// `TextStyle.toAnsi()` also emits codes for line-through and overline -
+  /// changing this would alter render semantics and is out of scope here.
+  static bool _hasStyle(TextStyle s) =>
+      s.color != null ||
+      s.backgroundColor != null ||
+      s.fontWeight == FontWeight.bold ||
+      s.fontWeight == FontWeight.dim ||
+      s.fontStyle == FontStyle.italic ||
+      s.decoration?.hasUnderline == true ||
+      s.reverse;
+
+  /// Full buffer diff: skips CUP on cells contiguous with the previous
+  /// changed cell, since the cursor naturally advances by `cell.width`
+  /// after a write. Per-cell hot path matches the old code (one
+  /// `terminal.write(cell.char)`); the only savings come from avoiding
+  /// redundant cursor-position escapes on adjacent changed cells.
   void _renderFullDiff(buf.Buffer buffer, buf.Buffer previous) {
     TextStyle? currentStyle;
 
     for (int y = 0; y < buffer.height; y++) {
+      // Cursor adjacency tracking. `inRun` says the cursor is currently
+      // positioned at `runEndX` (same row) and a CUP can be skipped if
+      // the next changed cell's x equals `runEndX`.
+      var inRun = false;
+      var runEndX = 0;
+
       for (int x = 0; x < buffer.width; x++) {
         final cell = buffer.getCell(x, y);
         final prevCell = previous.getCell(x, y);
 
-        // Skip unchanged cells
-        if (cell == prevCell) {
-          continue;
-        }
-
-        // Skip zero-width space markers (used for wide character tracking)
+        // Wide-char placeholder cell: the preceding wide char advanced
+        // the cursor through it via its `cell.width`. Don't touch the
+        // run, don't emit anything.
         if (cell.char == '\u200B') {
           continue;
         }
 
-        // Skip image placeholder cells - these will be rendered via sixel
+        // Image placeholder cell: rendered separately via
+        // `_renderPendingImages`. The cursor is NOT advanced through
+        // it, so any subsequent changed cell needs a fresh CUP.
         if (cell.isImagePlaceholder) {
+          inRun = false;
           continue;
         }
 
-        // Cell changed - move cursor and write
-        terminal.moveCursor(x, y);
+        if (cell == prevCell) {
+          inRun = false;
+          continue;
+        }
 
-        // Handle style
-        final hasStyle = cell.style.color != null ||
-            cell.style.backgroundColor != null ||
-            cell.style.fontWeight == FontWeight.bold ||
-            cell.style.fontWeight == FontWeight.dim ||
-            cell.style.fontStyle == FontStyle.italic ||
-            cell.style.decoration?.hasUnderline == true ||
-            cell.style.reverse;
+        // Reposition only when the cursor isn't already where we want
+        // to write (i.e., a new run start, or a non-contiguous jump).
+        if (!inRun || x != runEndX) {
+          terminal.moveCursor(x, y);
+          inRun = true;
+          runEndX = x;
+        }
 
-        if (hasStyle) {
-          if (currentStyle != cell.style) {
-            if (currentStyle != null) {
-              terminal.write(TextStyle.reset);
-            }
-            terminal.write(cell.style.toAnsi());
-            currentStyle = cell.style;
-          }
-          terminal.write(cell.char);
-        } else {
+        final effectiveStyle = _hasStyle(cell.style) ? cell.style : null;
+
+        if (effectiveStyle != currentStyle) {
           if (currentStyle != null) {
             terminal.write(TextStyle.reset);
-            currentStyle = null;
           }
-          terminal.write(cell.char);
+          if (effectiveStyle != null) {
+            terminal.write(effectiveStyle.toAnsi());
+          }
+          currentStyle = effectiveStyle;
         }
+
+        terminal.write(cell.char);
+        runEndX += cell.width;
       }
     }
 
