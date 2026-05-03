@@ -1,10 +1,32 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:ffi';
 import 'dart:io';
 
+import 'package:ffi/ffi.dart';
 import 'package:nocterm/src/size.dart';
 
 import 'terminal_backend.dart';
 import 'win32_ansi_stdin.dart';
+
+// FFI bindings for POSIX `write(2)` so we can bypass `dart:io`'s `IOSink`
+// (which adds buffering + async-encode overhead that's especially costly on
+// linux for large per-frame payloads). On linux/macOS, `libc` / `libSystem`
+// is loaded by default so `DynamicLibrary.process()` resolves `write`.
+typedef _NativeWrite = IntPtr Function(Int32 fd, Pointer<Uint8> buf, IntPtr n);
+typedef _DartWrite = int Function(int fd, Pointer<Uint8> buf, int n);
+
+final _DartWrite? _libcWrite = _resolveWrite();
+
+_DartWrite? _resolveWrite() {
+  if (Platform.isWindows) return null;
+  try {
+    return DynamicLibrary.process()
+        .lookupFunction<_NativeWrite, _DartWrite>('write');
+  } on Object {
+    return null;
+  }
+}
 
 /// Backend for native terminal I/O via stdin/stdout.
 /// Handles Unix signals (SIGWINCH, SIGINT, SIGTERM) for resize and shutdown.
@@ -83,7 +105,31 @@ class StdioBackend implements TerminalBackend {
 
   @override
   void writeRaw(String data) {
-    stdout.write(data);
+    final write = _libcWrite;
+    if (write == null) {
+      stdout.write(data);
+      return;
+    }
+    final bytes = utf8.encode(data);
+    if (bytes.isEmpty) return;
+    final buf = malloc.allocate<Uint8>(bytes.length);
+    try {
+      buf.asTypedList(bytes.length).setAll(0, bytes);
+      var written = 0;
+      while (written < bytes.length) {
+        final n = write(1, buf + written, bytes.length - written);
+        if (n <= 0) {
+          // EAGAIN/EINTR/etc — fall back to dart:io for the remainder so we
+          // don't lose the frame. Anything left after `write` returned <= 0
+          // gets re-encoded; rare path so cost doesn't matter.
+          stdout.write(utf8.decode(bytes.sublist(written)));
+          return;
+        }
+        written += n;
+      }
+    } finally {
+      malloc.free(buf);
+    }
   }
 
   @override
