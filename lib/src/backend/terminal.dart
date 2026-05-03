@@ -5,6 +5,7 @@ import 'package:nocterm/src/size.dart';
 import 'package:nocterm/src/style.dart';
 import 'package:nocterm/src/utils/escape_codes.dart';
 
+import 'byte_write_buffer.dart';
 import 'terminal_backend.dart';
 
 class Position {
@@ -24,10 +25,11 @@ class Terminal {
   @protected
   bool altScreenEnabled = false;
 
-  /// Write buffer for batching output.
+  /// Write buffer for batching output. Bytes accumulate here through the
+  /// frame; [flush] hands them to the backend without a String round-trip.
   /// Protected for subclass access (e.g., WebTerminal).
   @protected
-  final StringBuffer writeBuffer = StringBuffer();
+  final ByteWriteBuffer writeBuffer = ByteWriteBuffer();
 
   // ANSI escape codes for terminal control
 
@@ -110,9 +112,7 @@ class Terminal {
 
   void flush() {
     if (writeBuffer.isNotEmpty) {
-      final bufferContent = writeBuffer.toString();
-      backend.writeRaw(bufferContent);
-      writeBuffer.clear();
+      backend.writeRawBytes(writeBuffer.takeBytes());
     }
   }
 

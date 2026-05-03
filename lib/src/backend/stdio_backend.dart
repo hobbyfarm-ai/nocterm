@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 import 'package:nocterm/src/size.dart';
@@ -110,7 +111,16 @@ class StdioBackend implements TerminalBackend {
       stdout.write(data);
       return;
     }
-    final bytes = utf8.encode(data);
+    writeRawBytes(utf8.encode(data));
+  }
+
+  @override
+  void writeRawBytes(Uint8List bytes) {
+    final write = _libcWrite;
+    if (write == null) {
+      stdout.write(utf8.decode(bytes, allowMalformed: true));
+      return;
+    }
     if (bytes.isEmpty) return;
     final buf = malloc.allocate<Uint8>(bytes.length);
     try {
@@ -120,9 +130,9 @@ class StdioBackend implements TerminalBackend {
         final n = write(1, buf + written, bytes.length - written);
         if (n <= 0) {
           // EAGAIN/EINTR/etc — fall back to dart:io for the remainder so we
-          // don't lose the frame. Anything left after `write` returned <= 0
-          // gets re-encoded; rare path so cost doesn't matter.
-          stdout.write(utf8.decode(bytes.sublist(written)));
+          // don't lose the frame. Rare path; cost doesn't matter.
+          stdout
+              .write(utf8.decode(bytes.sublist(written), allowMalformed: true));
           return;
         }
         written += n;

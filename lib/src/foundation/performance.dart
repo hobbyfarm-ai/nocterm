@@ -264,6 +264,8 @@ class FrameTiming {
     required this.compositingDuration,
     required this.totalDuration,
     required this.timestamp,
+    this.diffLoopDuration = Duration.zero,
+    this.writeIoDuration = Duration.zero,
   });
 
   final int frameNumber;
@@ -274,6 +276,16 @@ class FrameTiming {
   final Duration totalDuration;
   final DateTime timestamp;
 
+  /// Time spent walking changed cells and emitting escape codes into the
+  /// terminal write buffer (after `paint` but before `terminal.flush()`).
+  /// Zero when the binding doesn't track this split.
+  final Duration diffLoopDuration;
+
+  /// Time spent in `terminal.flush()` — StringBuffer materialization,
+  /// UTF-8 encoding, and the actual stdout/FFI write. Zero when the
+  /// binding doesn't track this split.
+  final Duration writeIoDuration;
+
   /// Whether this frame exceeded the target frame budget (16.67ms for 60fps).
   bool get isSlowFrame => totalDuration.inMicroseconds > 16667;
 
@@ -283,11 +295,20 @@ class FrameTiming {
 
   @override
   String toString() {
-    return 'FrameTiming(#$frameNumber, total: ${totalDuration.inMilliseconds}ms, '
+    final buf = StringBuffer('FrameTiming(#$frameNumber, '
+        'total: ${totalDuration.inMilliseconds}ms, '
         'build: ${buildDuration.inMilliseconds}ms, '
         'layout: ${layoutDuration.inMilliseconds}ms, '
         'paint: ${paintDuration.inMilliseconds}ms, '
-        'composite: ${compositingDuration.inMilliseconds}ms)';
+        'composite: ${compositingDuration.inMilliseconds}ms');
+    if (diffLoopDuration > Duration.zero) {
+      buf.write(', diff: ${diffLoopDuration.inMilliseconds}ms');
+    }
+    if (writeIoDuration > Duration.zero) {
+      buf.write(', write: ${writeIoDuration.inMilliseconds}ms');
+    }
+    buf.write(')');
+    return buf.toString();
   }
 }
 

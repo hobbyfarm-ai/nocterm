@@ -7,6 +7,7 @@ import 'package:nocterm/src/rendering/mouse_tracker.dart';
 
 import '../backend/terminal.dart' as term;
 import '../buffer.dart' as buf;
+import 'dart:typed_data';
 
 /// Test binding for TUI applications that provides controlled frame rendering
 /// and state inspection capabilities for testing.
@@ -337,6 +338,9 @@ class _MockBackend implements TerminalBackend {
 
   @override
   void writeRaw(String data) {}
+
+  @override
+  void writeRawBytes(Uint8List bytes) {}
 
   @override
   Size getSize() => _size;

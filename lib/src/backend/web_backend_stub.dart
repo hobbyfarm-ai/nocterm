@@ -6,6 +6,8 @@ import 'dart:async';
 import 'package:nocterm/src/size.dart';
 
 import 'terminal_backend.dart';
+import 'dart:convert';
+import 'dart:typed_data';
 
 /// Stub WebBackend for non-web platforms.
 /// This class exists so that code can reference WebBackend without
@@ -58,6 +60,12 @@ class WebBackend implements TerminalBackend {
   @override
   void writeRaw(String data) {
     throw UnsupportedError('WebBackend is only available on web platforms');
+  }
+
+  @override
+  void writeRawBytes(Uint8List bytes) {
+    if (bytes.isEmpty) return;
+    writeRaw(utf8.decode(bytes, allowMalformed: true));
   }
 
   @override

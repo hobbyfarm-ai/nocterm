@@ -1113,7 +1113,9 @@ class TerminalBinding extends NoctermBinding
     // last streaming cell and the input field's caret.
     //
     // Letting the caller flush once after rendering the frame keeps the
-    // cursor at a single, stable position for the whole frame.
+    // cursor at a single, stable position for the whole frame. The caller
+    // captures FrameTiming.diffLoopDuration / writeIoDuration around that
+    // single flush.
   }
 
   /// Full redraw (used for first frame or after resize).
@@ -1476,11 +1478,16 @@ class TerminalBinding extends NoctermBinding
     // Render to terminal using differential rendering (buffer diff)
     _renderDifferential(buffer);
 
+    // Split FrameTiming into "diff scan + escape generation" (diffLoop) and
+    // "buffer materialize + write(2)" (writeIo) around the single frame flush.
+    currentFrameDiffLoopEnd = DateTime.now().microsecondsSinceEpoch;
+
     // After rendering, position the terminal cursor at the focused text
     // field's cursor location. This stabilises the IME composition window
     // (e.g. Chinese Pinyin) so it doesn't flicker across the screen.
     _positionImeCursor();
     terminal.flush();
+    currentFrameWriteIoEnd = DateTime.now().microsecondsSinceEpoch;
 
     if (profiling) {
       t5 = DateTime.now().microsecondsSinceEpoch;

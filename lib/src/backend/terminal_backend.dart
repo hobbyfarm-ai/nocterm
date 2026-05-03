@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:nocterm/src/size.dart';
 
@@ -11,6 +13,19 @@ import 'package:nocterm/src/size.dart';
 abstract class TerminalBackend {
   /// Write a string directly to the output (immediate, unbuffered).
   void writeRaw(String data);
+
+  /// Write raw UTF-8 bytes directly to the output.
+  ///
+  /// The default implementation round-trips through `utf8.decode` and
+  /// [writeRaw] so existing backends keep working without changes.
+  /// Backends that own a byte-oriented sink (e.g., a libc `write(2)`
+  /// FFI call against fd 1) SHOULD override this — the renderer
+  /// accumulates bytes directly via [ByteWriteBuffer], and skipping
+  /// the decode + re-encode round trip is the whole point.
+  void writeRawBytes(Uint8List bytes) {
+    if (bytes.isEmpty) return;
+    writeRaw(utf8.decode(bytes, allowMalformed: true));
+  }
 
   /// Get the current terminal size.
   Size getSize();

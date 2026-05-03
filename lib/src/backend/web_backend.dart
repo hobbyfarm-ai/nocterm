@@ -6,6 +6,7 @@ import 'package:nocterm/src/size.dart';
 
 import 'terminal_backend.dart';
 import 'web_bridge.dart';
+import 'dart:typed_data';
 
 /// Backend for web platform - uses JavaScript bridge for communication.
 ///
@@ -252,6 +253,12 @@ class WebBackend implements TerminalBackend {
         onOutput.callAsFunction(null, data.toJS);
       }
     }
+  }
+
+  @override
+  void writeRawBytes(Uint8List bytes) {
+    if (bytes.isEmpty) return;
+    writeRaw(utf8.decode(bytes, allowMalformed: true));
   }
 
   @override

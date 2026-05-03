@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:nocterm/src/size.dart';
 
@@ -22,6 +23,12 @@ class SocketBackend implements TerminalBackend {
     if (!_disposed) {
       _socket.write(data);
     }
+  }
+
+  @override
+  void writeRawBytes(Uint8List bytes) {
+    if (_disposed || bytes.isEmpty) return;
+    _socket.add(bytes);
   }
 
   @override

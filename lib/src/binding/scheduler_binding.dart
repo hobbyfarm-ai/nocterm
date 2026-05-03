@@ -285,6 +285,18 @@ mixin SchedulerBinding on NoctermBinding {
   @protected
   int? currentFramePaintEnd;
 
+  /// End of the diff-walk + escape-code-generation phase (after `paint`,
+  /// before `terminal.flush()`). Microseconds since epoch. Set by
+  /// `TerminalBinding._renderFullDiff`. Optional — not populated for
+  /// non-stdio backends or when the binding skips the diff path.
+  @protected
+  int? currentFrameDiffLoopEnd;
+
+  /// End of the stdout flush (after `terminal.flush()`). Microseconds
+  /// since epoch. Set by `TerminalBinding._renderFullDiff`. Optional.
+  @protected
+  int? currentFrameWriteIoEnd;
+
   /// The current frame timestamp.
   ///
   /// Available during frame processing. Represents microseconds since epoch.
@@ -632,6 +644,8 @@ mixin SchedulerBinding on NoctermBinding {
     currentFrameBuildEnd = null;
     currentFrameLayoutEnd = null;
     currentFramePaintEnd = null;
+    currentFrameDiffLoopEnd = null;
+    currentFrameWriteIoEnd = null;
 
     try {
       // Execute persistent frame callbacks
@@ -648,6 +662,8 @@ mixin SchedulerBinding on NoctermBinding {
           currentFrameBuildEnd ?? DateTime.now().microsecondsSinceEpoch;
       final layoutEnd = currentFrameLayoutEnd ?? buildEnd;
       final paintEnd = currentFramePaintEnd ?? layoutEnd;
+      final diffLoopEnd = currentFrameDiffLoopEnd;
+      final writeIoEnd = currentFrameWriteIoEnd;
 
       // Phase 4: Post-frame callbacks
       _schedulerPhase = SchedulerPhase.postFrameCallbacks;
@@ -670,6 +686,12 @@ mixin SchedulerBinding on NoctermBinding {
               Duration.zero, // Tracked separately in TerminalBinding
           totalDuration: frameEnd.difference(frameStart),
           timestamp: frameStart,
+          diffLoopDuration: diffLoopEnd != null
+              ? Duration(microseconds: diffLoopEnd - paintEnd)
+              : Duration.zero,
+          writeIoDuration: (diffLoopEnd != null && writeIoEnd != null)
+              ? Duration(microseconds: writeIoEnd - diffLoopEnd)
+              : Duration.zero,
         );
         _reportFrameTiming(timing);
       }

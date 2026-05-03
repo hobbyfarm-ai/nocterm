@@ -6,6 +6,8 @@ import 'dart:async';
 import 'package:nocterm/src/size.dart';
 
 import 'terminal_backend.dart';
+import 'dart:convert';
+import 'dart:typed_data';
 
 /// Stub SocketBackend for web platforms.
 /// This class exists so that code can reference SocketBackend without
@@ -25,6 +27,12 @@ class SocketBackend implements TerminalBackend {
   void writeRaw(String data) {
     throw UnsupportedError(
         'SocketBackend is only available on native platforms');
+  }
+
+  @override
+  void writeRawBytes(Uint8List bytes) {
+    if (bytes.isEmpty) return;
+    writeRaw(utf8.decode(bytes, allowMalformed: true));
   }
 
   @override
