@@ -1004,6 +1004,27 @@ class TerminalBinding extends NoctermBinding
       s.decoration?.hasUnderline == true ||
       s.reverse;
 
+  /// True when [next]'s SGR codes will fully overwrite [prev]'s effect, so
+  /// the renderer can skip the `\x1b[0m` reset between them.
+  ///
+  /// Color attrs (fg, bg) are "set value" — emitting a new fg SGR overrides
+  /// any previous fg. Flag attrs (weight/style/decoration/reverse) layer
+  /// additively in most terminals, so any difference there requires a reset.
+  ///
+  /// Saves 4 bytes per same-flag-set, color-only style transition. Big win
+  /// in styled-text workloads where adjacent runs differ only in color.
+  static bool _nextStyleCovers(TextStyle prev, TextStyle next) {
+    if (prev.color != null && next.color == null) return false;
+    if (prev.backgroundColor != null && next.backgroundColor == null) {
+      return false;
+    }
+    if (prev.fontWeight != next.fontWeight) return false;
+    if (prev.fontStyle != next.fontStyle) return false;
+    if (prev.decoration != next.decoration) return false;
+    if (prev.reverse != next.reverse) return false;
+    return true;
+  }
+
   /// Full buffer diff: skips CUP on cells contiguous with the previous
   /// changed cell, since the cursor naturally advances by `cell.width`
   /// after a write. Per-cell hot path matches the old code (one
@@ -1054,7 +1075,13 @@ class TerminalBinding extends NoctermBinding
         final effectiveStyle = _hasStyle(cell.style) ? cell.style : null;
 
         if (effectiveStyle != currentStyle) {
-          if (currentStyle != null) {
+          // Only emit reset when prev style has effects the new style won't
+          // overwrite. Skipping the redundant reset saves 4 bytes per
+          // color-only style change, the common case for styled text.
+          final needsReset = currentStyle != null &&
+              (effectiveStyle == null ||
+                  !_nextStyleCovers(currentStyle, effectiveStyle));
+          if (needsReset) {
             terminal.write(TextStyle.reset);
           }
           if (effectiveStyle != null) {
