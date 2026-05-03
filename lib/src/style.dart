@@ -159,6 +159,16 @@ class Color {
       return '\x1b[39m'; // Reset foreground to default
     }
     if (supportsTruecolor()) {
+      // Prefer the shorter 256-color SGR when this RGB happens to match an
+      // xterm palette entry exactly. Saves 6-9 bytes per emit with zero
+      // quality loss; falls through to truecolor otherwise.
+      final exact = exactAnsi256Index(red, green, blue);
+      if (exact != null) {
+        if (background) {
+          return '\x1b[48;5;${exact}m';
+        }
+        return '\x1b[38;5;${exact}m';
+      }
       if (background) {
         return '\x1b[48;2;$red;$green;${blue}m';
       }

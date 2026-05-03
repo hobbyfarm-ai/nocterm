@@ -1,6 +1,57 @@
 import 'dart:math' as math;
 import 'package:meta/meta.dart';
 
+/// Returns the xterm 256-color palette index for [red], [green], [blue]
+/// **only if the RGB values match a palette entry exactly** — otherwise
+/// returns null. Used by the renderer to emit the shorter `\x1b[38;5;Nm`
+/// (9-11 bytes) escape instead of `\x1b[38;2;R;G;Bm` (17-19 bytes) when
+/// no quality loss is incurred.
+///
+/// The palette has two regions worth checking:
+///   * 6×6×6 RGB cube (indices 16-231): each channel must be one of the
+///     six discrete cube values {0, 95, 135, 175, 215, 255}.
+///   * 24-step grayscale ramp (indices 232-255): r==g==b and the value
+///     equals 8 + n*10 for some n in [0, 23].
+///
+/// Standard ANSI colors (indices 0-15) are skipped because their actual
+/// RGB rendering is terminal-theme-dependent — emitting `\x1b[38;5;1m`
+/// when the user wrote `Color.fromRGB(231, 97, 112)` could change colors
+/// across themes. The cube/grayscale entries above are part of the
+/// xterm spec and should render identically across compliant terminals.
+int? exactAnsi256Index(int red, int green, int blue) {
+  final ri = _cubeChannelIndex(red);
+  final gi = _cubeChannelIndex(green);
+  final bi = _cubeChannelIndex(blue);
+  if (ri != null && gi != null && bi != null) {
+    return 16 + 36 * ri + 6 * gi + bi;
+  }
+  if (red == green && green == blue) {
+    if (red >= 8 && red <= 238 && (red - 8) % 10 == 0) {
+      return 232 + (red - 8) ~/ 10;
+    }
+  }
+  return null;
+}
+
+int? _cubeChannelIndex(int v) {
+  switch (v) {
+    case 0:
+      return 0;
+    case 95:
+      return 1;
+    case 135:
+      return 2;
+    case 175:
+      return 3;
+    case 215:
+      return 4;
+    case 255:
+      return 5;
+    default:
+      return null;
+  }
+}
+
 /// Quantizes RGB colors to the xterm 256-color palette.
 int quantizeRgbToAnsi256(int red, int green, int blue) {
   final cacheKey = (red << 16) | (green << 8) | blue;

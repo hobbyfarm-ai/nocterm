@@ -9,9 +9,21 @@ void main() {
     test('uses 24-bit ANSI when truecolor is supported', () {
       setSupportsTruecolorForTesting(true);
 
+      // (231, 97, 112) is not on the xterm-256 cube/ramp, so the renderer
+      // falls through to the 24-bit truecolor encoding.
+      const color = Color.fromRGB(231, 97, 112);
+      expect(color.toAnsi(), equals('\x1b[38;2;231;97;112m'));
+      expect(
+          color.toAnsi(background: true), equals('\x1b[48;2;231;97;112m'));
+    });
+
+    test('prefers shorter 256-color SGR for exact palette matches', () {
+      setSupportsTruecolorForTesting(true);
+
+      // (255, 0, 0) is xterm-256 cube index 196 — emit the shorter form.
       const color = Color.fromRGB(255, 0, 0);
-      expect(color.toAnsi(), equals('\x1b[38;2;255;0;0m'));
-      expect(color.toAnsi(background: true), equals('\x1b[48;2;255;0;0m'));
+      expect(color.toAnsi(), equals('\x1b[38;5;196m'));
+      expect(color.toAnsi(background: true), equals('\x1b[48;5;196m'));
     });
 
     test('uses 256-color ANSI when truecolor is not supported', () {
