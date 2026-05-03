@@ -6,6 +6,7 @@ import 'package:nocterm/src/style.dart';
 import 'package:nocterm/src/utils/escape_codes.dart';
 
 import 'byte_write_buffer.dart';
+import 'sgr_encoder.dart';
 import 'terminal_backend.dart';
 
 class Position {
@@ -109,6 +110,12 @@ class Terminal {
   void write(String text) {
     writeBuffer.write(text);
   }
+
+  /// Encodes [style]'s SGR escape sequence directly as bytes into the
+  /// [writeBuffer]. Equivalent to `write(style.toAnsi())` but avoids the
+  /// intermediate `String` allocation — used by the diff renderer's hot
+  /// path. See `sgr_encoder.dart` for the encoder itself.
+  void writeStyle(TextStyle style) => writeSgrBytesInto(style, writeBuffer);
 
   void flush() {
     if (writeBuffer.isNotEmpty) {

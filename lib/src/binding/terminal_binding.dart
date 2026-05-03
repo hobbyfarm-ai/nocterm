@@ -1085,7 +1085,7 @@ class TerminalBinding extends NoctermBinding
             terminal.write(TextStyle.reset);
           }
           if (effectiveStyle != null) {
-            terminal.write(effectiveStyle.toAnsi());
+            terminal.writeStyle(effectiveStyle);
           }
           currentStyle = effectiveStyle;
         }
@@ -1159,7 +1159,7 @@ class TerminalBinding extends NoctermBinding
             if (currentStyle != null) {
               terminal.write(TextStyle.reset);
             }
-            terminal.write(cell.style.toAnsi());
+            terminal.writeStyle(cell.style);
             currentStyle = cell.style;
           }
           terminal.write(cell.char);

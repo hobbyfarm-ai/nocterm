@@ -54,6 +54,65 @@ class ByteWriteBuffer {
     _len = pos;
   }
 
+  /// Appends a single ASCII byte directly. The caller is responsible for
+  /// passing a value in the range [0, 0x7F]; no validation is performed
+  /// because this is used in the SGR-encoder hot path.
+  void writeAsciiByte(int byte) {
+    if (_len == _buf.length) _ensureCapacity(_len + 1);
+    _buf[_len++] = byte;
+  }
+
+  /// Appends [value] as an ASCII decimal integer. Hot path for color
+  /// components and palette indices — both fall in [0, 999], so the
+  /// inlined branches below avoid a divmod loop entirely. Negative or
+  /// larger values fall through to a general routine.
+  void writeAsciiInt(int value) {
+    if (value < 0) {
+      _writeAsciiIntGeneral(value);
+      return;
+    }
+    if (value < 10) {
+      if (_len == _buf.length) _ensureCapacity(_len + 1);
+      _buf[_len++] = 0x30 + value;
+      return;
+    }
+    if (value < 100) {
+      _ensureCapacity(_len + 2);
+      _buf[_len++] = 0x30 + (value ~/ 10);
+      _buf[_len++] = 0x30 + (value % 10);
+      return;
+    }
+    if (value < 1000) {
+      _ensureCapacity(_len + 3);
+      _buf[_len++] = 0x30 + (value ~/ 100);
+      _buf[_len++] = 0x30 + ((value ~/ 10) % 10);
+      _buf[_len++] = 0x30 + (value % 10);
+      return;
+    }
+    _writeAsciiIntGeneral(value);
+  }
+
+  void _writeAsciiIntGeneral(int value) {
+    // Fall-through for values outside the 0-999 fast path.
+    final s = value.toString();
+    final n = s.length;
+    _ensureCapacity(_len + n);
+    for (var i = 0; i < n; i++) {
+      _buf[_len + i] = s.codeUnitAt(i);
+    }
+    _len += n;
+  }
+
+  /// Appends bytes from a `Uint8List` directly via `setRange`. Intended
+  /// for precomputed escape-sequence prefixes — no encoding work happens.
+  void writeAsciiBytes(Uint8List bytes) {
+    final n = bytes.length;
+    if (n == 0) return;
+    _ensureCapacity(_len + n);
+    _buf.setRange(_len, _len + n, bytes);
+    _len += n;
+  }
+
   /// Returns the accumulated bytes as a freshly-allocated `Uint8List` and
   /// resets the buffer. Allocates once per flush — much cheaper than the
   /// previous `StringBuffer.toString()` + `utf8.encode` pair.
