@@ -10,7 +10,7 @@ enum DividerStyle {
   ascii,
 }
 
-class Divider extends SingleChildRenderObjectComponent {
+class Divider extends StatelessComponent {
   const Divider({
     super.key,
     this.height = 1.0,
@@ -28,37 +28,67 @@ class Divider extends SingleChildRenderObjectComponent {
 
   /// The color of the divider.
   ///
-  /// If null, defaults to the theme's [TuiThemeData.outline] color.
+  /// If null, defaults to the theme's [TuiThemeData.outline] color. The
+  /// theme lookup happens in [build] so the element registers a
+  /// dependency on [TuiTheme] and repaints when the theme changes.
   final Color? color;
   final DividerStyle style;
 
   @override
+  Component build(BuildContext context) {
+    return _RawDivider(
+      height: height,
+      thickness: thickness,
+      indent: indent,
+      endIndent: endIndent,
+      color: color ?? TuiTheme.of(context).outline,
+      style: style,
+    );
+  }
+}
+
+class _RawDivider extends SingleChildRenderObjectComponent {
+  const _RawDivider({
+    required this.height,
+    required this.thickness,
+    required this.indent,
+    required this.endIndent,
+    required this.color,
+    required this.style,
+  });
+
+  final double height;
+  final double thickness;
+  final double indent;
+  final double endIndent;
+  final Color color;
+  final DividerStyle style;
+
+  @override
   RenderObject createRenderObject(BuildContext context) {
-    final theme = TuiTheme.of(context);
     return RenderDivider(
       height: height,
       thickness: thickness,
       indent: indent,
       endIndent: endIndent,
-      color: color ?? theme.outline,
+      color: color,
       style: style,
     );
   }
 
   @override
   void updateRenderObject(BuildContext context, RenderDivider renderObject) {
-    final theme = TuiTheme.of(context);
     renderObject
       ..height = height
       ..thickness = thickness
       ..indent = indent
       ..endIndent = endIndent
-      ..color = color ?? theme.outline
+      ..color = color
       ..style = style;
   }
 }
 
-class VerticalDivider extends SingleChildRenderObjectComponent {
+class VerticalDivider extends StatelessComponent {
   const VerticalDivider({
     super.key,
     this.width = 1.0,
@@ -76,19 +106,50 @@ class VerticalDivider extends SingleChildRenderObjectComponent {
 
   /// The color of the divider.
   ///
-  /// If null, defaults to the theme's [TuiThemeData.outline] color.
+  /// If null, defaults to the theme's [TuiThemeData.outline] color. The
+  /// theme lookup happens in [build] so the element registers a
+  /// dependency on [TuiTheme] and repaints when the theme changes.
   final Color? color;
   final DividerStyle style;
 
   @override
+  Component build(BuildContext context) {
+    return _RawVerticalDivider(
+      width: width,
+      thickness: thickness,
+      indent: indent,
+      endIndent: endIndent,
+      color: color ?? TuiTheme.of(context).outline,
+      style: style,
+    );
+  }
+}
+
+class _RawVerticalDivider extends SingleChildRenderObjectComponent {
+  const _RawVerticalDivider({
+    required this.width,
+    required this.thickness,
+    required this.indent,
+    required this.endIndent,
+    required this.color,
+    required this.style,
+  });
+
+  final double width;
+  final double thickness;
+  final double indent;
+  final double endIndent;
+  final Color color;
+  final DividerStyle style;
+
+  @override
   RenderObject createRenderObject(BuildContext context) {
-    final theme = TuiTheme.of(context);
     return RenderVerticalDivider(
       width: width,
       thickness: thickness,
       indent: indent,
       endIndent: endIndent,
-      color: color ?? theme.outline,
+      color: color,
       style: style,
     );
   }
@@ -96,13 +157,12 @@ class VerticalDivider extends SingleChildRenderObjectComponent {
   @override
   void updateRenderObject(
       BuildContext context, RenderVerticalDivider renderObject) {
-    final theme = TuiTheme.of(context);
     renderObject
       ..width = width
       ..thickness = thickness
       ..indent = indent
       ..endIndent = endIndent
-      ..color = color ?? theme.outline
+      ..color = color
       ..style = style;
   }
 }

@@ -76,12 +76,13 @@ class _ScrollbarState extends State<Scrollbar> {
 
   @override
   Component build(BuildContext context) {
+    final theme = TuiTheme.of(context);
     return _ScrollbarRenderObjectWidget(
       controller: _controller,
       thumbVisibility: component.thumbVisibility,
       thickness: component.thickness,
-      trackColor: component.trackColor,
-      thumbColor: component.thumbColor,
+      trackColor: component.trackColor ?? theme.surface,
+      thumbColor: component.thumbColor ?? theme.onSurface,
       child: component.child,
     );
   }
@@ -92,38 +93,36 @@ class _ScrollbarRenderObjectWidget extends SingleChildRenderObjectComponent {
     required this.controller,
     required this.thumbVisibility,
     required this.thickness,
-    this.trackColor,
-    this.thumbColor,
+    required this.trackColor,
+    required this.thumbColor,
     required super.child,
   });
 
   final ScrollController? controller;
   final bool thumbVisibility;
   final double thickness;
-  final Color? trackColor;
-  final Color? thumbColor;
+  final Color trackColor;
+  final Color thumbColor;
 
   @override
   RenderObject createRenderObject(BuildContext context) {
-    final theme = TuiTheme.of(context);
     return RenderScrollbar(
       controller: controller,
       thumbVisibility: thumbVisibility,
       thickness: thickness,
-      trackColor: trackColor ?? theme.surface,
-      thumbColor: thumbColor ?? theme.onSurface,
+      trackColor: trackColor,
+      thumbColor: thumbColor,
     );
   }
 
   @override
   void updateRenderObject(BuildContext context, RenderScrollbar renderObject) {
-    final theme = TuiTheme.of(context);
     renderObject
       ..controller = controller
       ..thumbVisibility = thumbVisibility
       ..thickness = thickness
-      ..trackColor = trackColor ?? theme.surface
-      ..thumbColor = thumbColor ?? theme.onSurface;
+      ..trackColor = trackColor
+      ..thumbColor = thumbColor;
   }
 }
 

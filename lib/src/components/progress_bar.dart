@@ -12,7 +12,7 @@ enum ProgressBarBorderStyle {
   doubleVertical,
 }
 
-class ProgressBar extends SingleChildRenderObjectComponent {
+class ProgressBar extends StatelessComponent {
   const ProgressBar({
     super.key,
     this.value,
@@ -32,12 +32,16 @@ class ProgressBar extends SingleChildRenderObjectComponent {
 
   /// The background color for the progress bar.
   ///
-  /// If null, defaults to the theme's [TuiThemeData.outline] color.
+  /// If null, defaults to the theme's [TuiThemeData.outline] color. The
+  /// theme lookup happens in [build] so the element registers a
+  /// dependency on [TuiTheme] and repaints when the theme changes.
   final Color? backgroundColor;
 
   /// The color for the filled portion of the progress bar.
   ///
-  /// If null, defaults to the theme's [TuiThemeData.primary] color.
+  /// If null, defaults to the theme's [TuiThemeData.primary] color. The
+  /// theme lookup happens in [build] so the element registers a
+  /// dependency on [TuiTheme] and repaints when the theme changes.
   final Color? valueColor;
   final ProgressBarBorderStyle? borderStyle;
   final String fillCharacter;
@@ -47,9 +51,9 @@ class ProgressBar extends SingleChildRenderObjectComponent {
   final bool indeterminate;
 
   @override
-  RenderObject createRenderObject(BuildContext context) {
+  Component build(BuildContext context) {
     final theme = TuiTheme.of(context);
-    return RenderProgressBar(
+    return _RawProgressBar(
       value: value,
       minHeight: minHeight,
       backgroundColor: backgroundColor ?? theme.outline,
@@ -62,16 +66,57 @@ class ProgressBar extends SingleChildRenderObjectComponent {
       indeterminate: indeterminate,
     );
   }
+}
+
+class _RawProgressBar extends SingleChildRenderObjectComponent {
+  const _RawProgressBar({
+    required this.value,
+    required this.minHeight,
+    required this.backgroundColor,
+    required this.valueColor,
+    required this.borderStyle,
+    required this.fillCharacter,
+    required this.emptyCharacter,
+    required this.showPercentage,
+    required this.label,
+    required this.indeterminate,
+  });
+
+  final double? value;
+  final double minHeight;
+  final Color backgroundColor;
+  final Color valueColor;
+  final ProgressBarBorderStyle? borderStyle;
+  final String fillCharacter;
+  final String emptyCharacter;
+  final bool showPercentage;
+  final String? label;
+  final bool indeterminate;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) {
+    return RenderProgressBar(
+      value: value,
+      minHeight: minHeight,
+      backgroundColor: backgroundColor,
+      valueColor: valueColor,
+      borderStyle: borderStyle,
+      fillCharacter: fillCharacter,
+      emptyCharacter: emptyCharacter,
+      showPercentage: showPercentage,
+      label: label,
+      indeterminate: indeterminate,
+    );
+  }
 
   @override
   void updateRenderObject(
       BuildContext context, RenderProgressBar renderObject) {
-    final theme = TuiTheme.of(context);
     renderObject
       ..value = value
       ..minHeight = minHeight
-      ..backgroundColor = backgroundColor ?? theme.outline
-      ..valueColor = valueColor ?? theme.primary
+      ..backgroundColor = backgroundColor
+      ..valueColor = valueColor
       ..borderStyle = borderStyle
       ..fillCharacter = fillCharacter
       ..emptyCharacter = emptyCharacter

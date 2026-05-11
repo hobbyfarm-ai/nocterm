@@ -861,13 +861,39 @@ enum DecorationPosition {
   foreground,
 }
 
-/// Widget that paints a decoration either before or after its child
-class DecoratedBox extends SingleChildRenderObjectComponent {
+/// Widget that paints a decoration either before or after its child.
+///
+/// The theme outline color is resolved in [build] (via [TuiTheme.of])
+/// so the element registers a dependency on [TuiTheme] and repaints
+/// when the theme changes.
+class DecoratedBox extends StatelessComponent {
   const DecoratedBox({
     super.key,
     required this.decoration,
     this.position = DecorationPosition.background,
-    super.child,
+    this.child,
+  });
+
+  final BoxDecoration decoration;
+  final DecorationPosition position;
+  final Component? child;
+
+  @override
+  Component build(BuildContext context) {
+    final theme = TuiTheme.of(context);
+    return _RawDecoratedBox(
+      decoration: decoration.withThemeColor(theme.outline),
+      position: position,
+      child: child,
+    );
+  }
+}
+
+class _RawDecoratedBox extends SingleChildRenderObjectComponent {
+  const _RawDecoratedBox({
+    required this.decoration,
+    required this.position,
+    required super.child,
   });
 
   final BoxDecoration decoration;
@@ -875,9 +901,8 @@ class DecoratedBox extends SingleChildRenderObjectComponent {
 
   @override
   RenderObject createRenderObject(BuildContext context) {
-    final theme = TuiTheme.of(context);
     return RenderDecoratedBox(
-      decoration: decoration.withThemeColor(theme.outline),
+      decoration: decoration,
       position: position,
     );
   }
@@ -885,9 +910,8 @@ class DecoratedBox extends SingleChildRenderObjectComponent {
   @override
   void updateRenderObject(
       BuildContext context, RenderDecoratedBox renderObject) {
-    final theme = TuiTheme.of(context);
     renderObject
-      ..decoration = decoration.withThemeColor(theme.outline)
+      ..decoration = decoration
       ..position = position;
   }
 }
