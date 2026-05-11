@@ -30,7 +30,8 @@ class SelectionArea extends StatefulComponent {
   const SelectionArea({
     super.key,
     required this.child,
-    this.selectionColor,
+    this.selection,
+    this.onSelection,
     this.onSelectionChanged,
     this.onSelectionCompleted,
   });
@@ -38,9 +39,13 @@ class SelectionArea extends StatefulComponent {
   /// The child widget tree containing [Text] widgets to make selectable.
   final Component child;
 
-  /// The color used to highlight selected text.
-  /// If null, defaults to [TuiThemeData.selectionColor].
-  final Color? selectionColor;
+  /// Background color used to highlight selected text.
+  /// If null, defaults to [TuiThemeData.selection].
+  final Color? selection;
+
+  /// Foreground color for text drawn on top of [selection].
+  /// If null, defaults to [TuiThemeData.onSelection].
+  final Color? onSelection;
 
   /// Called when the selection changes. The callback receives the currently
   /// selected text (possibly spanning multiple widgets), or an empty string
@@ -105,14 +110,16 @@ class _SelectionAreaState extends State<SelectionArea> {
   @override
   Component build(BuildContext context) {
     final theme = TuiTheme.of(context);
-    final effectiveColor = component.selectionColor ?? theme.selectionColor;
+    final effectiveSelection = component.selection ?? theme.selection;
+    final effectiveOnSelection = component.onSelection ?? theme.onSelection;
 
     return SelectionScope(
       isActive: _isActive,
       rangeFor: _rangeFor,
       updateRange: _updateRange,
       child: _SelectionAreaWidget(
-        selectionColor: effectiveColor,
+        selection: effectiveSelection,
+        onSelection: effectiveOnSelection,
         onSelectionChanged: component.onSelectionChanged,
         onSelectionCompleted: component.onSelectionCompleted,
         onDragStarted: _onDragStarted,
@@ -128,7 +135,8 @@ class _SelectionAreaState extends State<SelectionArea> {
 class _SelectionAreaWidget extends SingleChildRenderObjectComponent {
   const _SelectionAreaWidget({
     required super.child,
-    required this.selectionColor,
+    required this.selection,
+    required this.onSelection,
     this.onSelectionChanged,
     this.onSelectionCompleted,
     this.onDragStarted,
@@ -136,7 +144,8 @@ class _SelectionAreaWidget extends SingleChildRenderObjectComponent {
     this.onRangeUpdated,
   });
 
-  final Color selectionColor;
+  final Color selection;
+  final Color onSelection;
   final ValueChanged<String>? onSelectionChanged;
   final ValueChanged<String>? onSelectionCompleted;
   final VoidCallback? onDragStarted;
@@ -147,7 +156,8 @@ class _SelectionAreaWidget extends SingleChildRenderObjectComponent {
   @override
   RenderObject createRenderObject(BuildContext context) {
     return RenderSelectionArea(
-      selectionColor: selectionColor,
+      selection: selection,
+      onSelection: onSelection,
       onSelectionChanged: onSelectionChanged,
       onSelectionCompleted: onSelectionCompleted,
       onDragStarted: onDragStarted,
@@ -160,7 +170,8 @@ class _SelectionAreaWidget extends SingleChildRenderObjectComponent {
   void updateRenderObject(
       BuildContext context, covariant RenderSelectionArea renderObject) {
     renderObject
-      ..selectionColor = selectionColor
+      ..selection = selection
+      ..onSelection = onSelection
       ..onSelectionChanged = onSelectionChanged
       ..onSelectionCompleted = onSelectionCompleted
       ..onDragStarted = onDragStarted
@@ -175,22 +186,35 @@ class _SelectionAreaWidget extends SingleChildRenderObjectComponent {
 /// events, and it walks its render subtree to discover [Selectable] children.
 class RenderSelectionArea extends RenderMouseRegion {
   RenderSelectionArea({
-    required Color selectionColor,
+    required Color selection,
+    required Color onSelection,
     this.onSelectionChanged,
     this.onSelectionCompleted,
     this.onDragStarted,
     this.onDragEnded,
     this.onRangeUpdated,
-  }) : _selectionColor = selectionColor;
+  })  : _selection = selection,
+        _onSelection = onSelection;
 
-  Color _selectionColor;
-  Color get selectionColor => _selectionColor;
-  set selectionColor(Color value) {
-    if (_selectionColor == value) return;
-    _selectionColor = value;
+  Color _selection;
+  Color get selection => _selection;
+  set selection(Color value) {
+    if (_selection == value) return;
+    _selection = value;
     // Push color to all currently-selected selectables
     for (final s in _cachedSelectables) {
-      s.selectionColor = value;
+      s.selection = value;
+    }
+    markNeedsPaint();
+  }
+
+  Color _onSelection;
+  Color get onSelection => _onSelection;
+  set onSelection(Color value) {
+    if (_onSelection == value) return;
+    _onSelection = value;
+    for (final s in _cachedSelectables) {
+      s.onSelection = value;
     }
     markNeedsPaint();
   }
@@ -1134,7 +1158,8 @@ class RenderSelectionArea extends RenderMouseRegion {
 
     for (int i = 0; i < entries.length; i++) {
       final s = entries[i].selectable;
-      s.selectionColor = _selectionColor;
+      s.selection = _selection;
+      s.onSelection = _onSelection;
 
       if (i < startIdx || i > endIdx) {
         // Outside the selection span

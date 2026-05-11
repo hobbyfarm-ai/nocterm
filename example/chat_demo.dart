@@ -138,7 +138,7 @@ class _ChatDemoState extends State<ChatDemo> {
   Component build(BuildContext context) {
     return SelectionArea(
       onSelectionCompleted: ClipboardManager.copy,
-      selectionColor: Colors.red,
+      selection: Colors.red,
       child: Focusable(
         focused: true,
         onKeyEvent: _handleKeyEvent,

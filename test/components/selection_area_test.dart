@@ -323,9 +323,9 @@ void main() {
       );
     });
 
-    test('selectionColor setter updates cached selectables', () async {
+    test('selection setter updates cached selectables', () async {
       await testNocterm(
-        'selectionColor setter',
+        'selection setter',
         (tester) async {
           RenderSelectionArea? renderObject;
           String? lastChanged;
@@ -337,7 +337,7 @@ void main() {
               child: _RenderSelectionAreaHarness(
                 onCreated: (ro) => renderObject = ro,
                 onSelectionChanged: (text) => lastChanged = text,
-                selectionColor: Colors.red,
+                selection: Colors.red,
                 child: const Text('Hello'),
               ),
             ),
@@ -355,11 +355,11 @@ void main() {
 
           expect(lastChanged, isNotBlank);
 
-          final current = renderObject!.selectionColor;
+          final current = renderObject!.selection;
           expect(current, equals(Colors.red));
 
-          renderObject!.selectionColor = Colors.green;
-          expect(renderObject!.selectionColor, equals(Colors.green));
+          renderObject!.selection = Colors.green;
+          expect(renderObject!.selection, equals(Colors.green));
         },
       );
     });
@@ -938,7 +938,7 @@ void main() {
       );
     });
 
-    test('selectionColor same-value early return and actual update', () async {
+    test('selection same-value early return and actual update', () async {
       await testNocterm(
         'selection color update',
         (tester) async {
@@ -950,7 +950,7 @@ void main() {
               width: 20,
               height: 4,
               child: SelectionArea(
-                selectionColor: Colors.red,
+                selection: Colors.red,
                 onSelectionChanged: (text) => lastChanged = text,
                 child: const Text('Hello'),
               ),
@@ -976,7 +976,7 @@ void main() {
               width: 20,
               height: 4,
               child: SelectionArea(
-                selectionColor: Colors.red,
+                selection: Colors.red,
                 onSelectionChanged: (text) => lastChanged = text,
                 child: const Text('Hello'),
               ),
@@ -989,7 +989,7 @@ void main() {
               width: 20,
               height: 4,
               child: SelectionArea(
-                selectionColor: Colors.green,
+                selection: Colors.green,
                 onSelectionChanged: (text) => lastChanged = text,
                 child: const Text('Hello'),
               ),
@@ -1755,18 +1755,19 @@ class _RenderSelectionAreaHarness extends SingleChildRenderObjectComponent {
     this.onCreated,
     this.onSelectionChanged,
     this.onSelectionCompleted,
-    this.selectionColor,
+    this.selection,
   });
 
   final void Function(RenderSelectionArea)? onCreated;
   final ValueChanged<String>? onSelectionChanged;
   final ValueChanged<String>? onSelectionCompleted;
-  final Color? selectionColor;
+  final Color? selection;
 
   @override
   RenderObject createRenderObject(BuildContext context) {
     final renderObject = RenderSelectionArea(
-      selectionColor: selectionColor ?? Colors.blue,
+      selection: selection ?? Colors.blue,
+      onSelection: Colors.white,
       onSelectionChanged: onSelectionChanged,
       onSelectionCompleted: onSelectionCompleted,
     );
@@ -1777,8 +1778,8 @@ class _RenderSelectionAreaHarness extends SingleChildRenderObjectComponent {
   @override
   void updateRenderObject(
       BuildContext context, covariant RenderSelectionArea renderObject) {
-    if (selectionColor != null) {
-      renderObject.selectionColor = selectionColor!;
+    if (selection != null) {
+      renderObject.selection = selection!;
     }
     renderObject
       ..onSelectionChanged = onSelectionChanged

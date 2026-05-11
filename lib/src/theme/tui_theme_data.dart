@@ -68,8 +68,11 @@ class TuiThemeData {
   /// Lighter variant of outline for subtle borders.
   final Color outlineVariant;
 
-  /// Color used to highlight selected text in [SelectionArea].
-  final Color selectionColor;
+  /// Background color used to highlight selected text in [SelectionArea].
+  final Color selection;
+
+  /// Foreground color for text drawn on top of [selection].
+  final Color onSelection;
 
   /// Creates a custom theme with the specified colors.
   const TuiThemeData({
@@ -90,7 +93,8 @@ class TuiThemeData {
     required this.onWarning,
     required this.outline,
     required this.outlineVariant,
-    required this.selectionColor,
+    required this.selection,
+    required this.onSelection,
   });
 
   /// Creates a copy of this theme with the given fields replaced.
@@ -112,7 +116,8 @@ class TuiThemeData {
     Color? onWarning,
     Color? outline,
     Color? outlineVariant,
-    Color? selectionColor,
+    Color? selection,
+    Color? onSelection,
   }) {
     return TuiThemeData(
       brightness: brightness ?? this.brightness,
@@ -132,7 +137,8 @@ class TuiThemeData {
       onWarning: onWarning ?? this.onWarning,
       outline: outline ?? this.outline,
       outlineVariant: outlineVariant ?? this.outlineVariant,
-      selectionColor: selectionColor ?? this.selectionColor,
+      selection: selection ?? this.selection,
+      onSelection: onSelection ?? this.onSelection,
     );
   }
 
@@ -184,7 +190,8 @@ class TuiThemeData {
     onWarning: Color(0x18181C),
     outline: Color(0x9299A6),
     outlineVariant: Color(0x4B5563),
-    selectionColor: Color(0x264F78),
+    selection: Color(0x264F78),
+    onSelection: Color(0xD4D4D4),
   );
 
   /// A light theme with dark text on light backgrounds.
@@ -206,7 +213,8 @@ class TuiThemeData {
     onWarning: Color(0x18181C),
     outline: Color(0x6A717E),
     outlineVariant: Color(0xD1D5DB),
-    selectionColor: Color(0xADD6FF),
+    selection: Color(0xADD6FF),
+    onSelection: Color(0x18181C),
   );
 
   /// Nord theme - an arctic, north-bluish color palette.
@@ -230,7 +238,8 @@ class TuiThemeData {
     onWarning: Color(0x2E3440),
     outline: Color(0x4C566A),
     outlineVariant: Color(0x434C5E),
-    selectionColor: Color(0x3B5070),
+    selection: Color(0x3B5070),
+    onSelection: Color(0xECEFF4),
   );
 
   /// Dracula theme - a dark theme with vibrant colors.
@@ -254,7 +263,8 @@ class TuiThemeData {
     onWarning: Color(0x282A36),
     outline: Color(0x6272A4),
     outlineVariant: Color(0x44475A),
-    selectionColor: Color(0x645484),
+    selection: Color(0x645484),
+    onSelection: Color(0xF8F8F2),
   );
 
   /// Catppuccin Mocha theme - a warm, cozy dark theme.
@@ -278,7 +288,8 @@ class TuiThemeData {
     onWarning: Color(0x1E1E2E),
     outline: Color(0x6C7086),
     outlineVariant: Color(0x45475A),
-    selectionColor: Color(0x495A80),
+    selection: Color(0x495A80),
+    onSelection: Color(0xCDD6F4),
   );
 
   /// Gruvbox Dark theme - a retro groove theme.
@@ -302,7 +313,8 @@ class TuiThemeData {
     onWarning: Color(0x282828),
     outline: Color(0x665C54),
     outlineVariant: Color(0x504945),
-    selectionColor: Color(0x4C5A55),
+    selection: Color(0x4C5A55),
+    onSelection: Color(0xEBDBB2),
   );
 
   @override
@@ -326,7 +338,8 @@ class TuiThemeData {
         other.onWarning == onWarning &&
         other.outline == outline &&
         other.outlineVariant == outlineVariant &&
-        other.selectionColor == selectionColor;
+        other.selection == selection &&
+        other.onSelection == onSelection;
   }
 
   @override
@@ -348,7 +361,8 @@ class TuiThemeData {
         onWarning,
         outline,
         outlineVariant,
-        selectionColor,
+        selection,
+        onSelection,
       );
 
   @override

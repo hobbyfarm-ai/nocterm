@@ -133,6 +133,7 @@ class TextField extends StatefulComponent {
     this.cursorStyle = CursorStyle.block,
     this.cursorBlinkRate,
     this.selectionColor,
+    this.onSelectionColor,
     this.showCursor = true,
     this.width,
     this.height,
@@ -188,6 +189,11 @@ class TextField extends StatefulComponent {
   /// If null, defaults to the theme's [TuiThemeData.primary] color with
   /// reduced opacity.
   final Color? selectionColor;
+
+  /// Foreground color for text drawn on top of [selectionColor].
+  ///
+  /// If null, defaults to the theme's [TuiThemeData.onSelection].
+  final Color? onSelectionColor;
   final bool showCursor;
   final double? width;
   final double? height;
@@ -933,6 +939,8 @@ class _TextFieldState extends State<TextField> {
     final effectiveCursorColor = component.cursorColor ?? theme.primary;
     final effectiveSelectionColor =
         component.selectionColor ?? theme.primary.withOpacity(0.4);
+    final effectiveOnSelectionColor =
+        component.onSelectionColor ?? theme.onSelection;
 
     // Build the text field content
     Component content = _TextFieldContent(
@@ -946,6 +954,7 @@ class _TextFieldState extends State<TextField> {
       cursorColor: effectiveCursorColor,
       cursorStyle: component.cursorStyle,
       selectionColor: effectiveSelectionColor,
+      onSelectionColor: effectiveOnSelectionColor,
       textAlign: component.textAlign,
       maxLines: component.maxLines,
       isFocused: isFocused, // Pass focus state to render object
@@ -996,6 +1005,7 @@ class _TextFieldContent extends SingleChildRenderObjectComponent {
     this.cursorColor,
     this.cursorStyle = CursorStyle.block,
     this.selectionColor,
+    this.onSelectionColor,
     required this.textAlign,
     this.maxLines,
     required this.isFocused,
@@ -1015,6 +1025,7 @@ class _TextFieldContent extends SingleChildRenderObjectComponent {
   final Color? cursorColor;
   final CursorStyle cursorStyle;
   final Color? selectionColor;
+  final Color? onSelectionColor;
   final TextAlign textAlign;
   final int? maxLines;
   final bool isFocused;
@@ -1036,6 +1047,7 @@ class _TextFieldContent extends SingleChildRenderObjectComponent {
       cursorColor: cursorColor,
       cursorStyle: cursorStyle,
       selectionColor: selectionColor,
+      onSelectionColor: onSelectionColor,
       textAlign: textAlign,
       maxLines: maxLines,
       isFocused: isFocused,
@@ -1060,6 +1072,7 @@ class _TextFieldContent extends SingleChildRenderObjectComponent {
       ..cursorColor = cursorColor
       ..cursorStyle = cursorStyle
       ..selectionColor = selectionColor
+      ..onSelectionColor = onSelectionColor
       ..textAlign = textAlign
       ..maxLines = maxLines
       ..isFocused = isFocused
@@ -1081,6 +1094,7 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
     Color? cursorColor,
     CursorStyle cursorStyle = CursorStyle.block,
     Color? selectionColor,
+    Color? onSelectionColor,
     required TextAlign textAlign,
     int? maxLines,
     required bool isFocused,
@@ -1097,6 +1111,7 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
         _cursorColor = cursorColor,
         _cursorStyle = cursorStyle,
         _selectionColor = selectionColor,
+        _onSelectionColor = onSelectionColor,
         _textAlign = textAlign,
         _maxLines = maxLines,
         _isFocused = isFocused,
@@ -1115,6 +1130,7 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
   Color? _cursorColor;
   CursorStyle _cursorStyle;
   Color? _selectionColor;
+  Color? _onSelectionColor;
   TextAlign _textAlign;
 
   @override
@@ -1210,6 +1226,13 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
   set selectionColor(Color? value) {
     if (_selectionColor != value) {
       _selectionColor = value;
+      markNeedsPaint();
+    }
+  }
+
+  set onSelectionColor(Color? value) {
+    if (_onSelectionColor != value) {
+      _onSelectionColor = value;
       markNeedsPaint();
     }
   }
@@ -1765,7 +1788,8 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
       lines: _layoutResult?.lines ?? const [],
       selectionStart: _selection.isCollapsed ? null : _selection.start,
       selectionEnd: _selection.isCollapsed ? null : _selection.end,
-      selectionColor: _selectionColor ?? Colors.blue,
+      selection: _selectionColor ?? Colors.blue,
+      onSelection: _onSelectionColor ?? Colors.white,
     );
   }
 

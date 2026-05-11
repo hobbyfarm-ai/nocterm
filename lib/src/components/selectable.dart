@@ -22,8 +22,11 @@ mixin Selectable on RenderObject {
   int? _selectionStart;
   int? _selectionEnd;
 
-  /// The color used to highlight selected text.
-  Color? selectionColor;
+  /// Background color used to highlight selected text.
+  Color? selection;
+
+  /// Foreground color for text drawn on top of [selection].
+  Color? onSelection;
 
   /// Current selection start (character index), or null if no selection.
   int? get selectionStart => _selectionStart;
@@ -84,7 +87,8 @@ mixin Selectable on RenderObject {
       lines: selectableLayout?.lines ?? const [],
       selectionStart: _selectionStart,
       selectionEnd: _selectionEnd,
-      selectionColor: selectionColor ?? Colors.blue,
+      selection: selection ?? Colors.blue,
+      onSelection: onSelection ?? Colors.white,
     );
   }
 

@@ -309,8 +309,10 @@ class RenderParagraph extends RenderObject with Selectable {
         if (localSelStart < localSelEnd) {
           final selectedText =
               segmentText.substring(localSelStart, localSelEnd);
-          final selectionStyle = (segment.style ?? const TextStyle())
-              .copyWith(backgroundColor: selectionColor ?? Colors.blue);
+          final selectionStyle = (segment.style ?? const TextStyle()).copyWith(
+            backgroundColor: selection ?? Colors.blue,
+            color: onSelection ?? Colors.white,
+          );
           canvas.drawText(
             Offset(currentX, offset.dy),
             selectedText,

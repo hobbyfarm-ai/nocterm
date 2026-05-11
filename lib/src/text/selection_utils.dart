@@ -65,7 +65,8 @@ void paintTextWithSelection({
   required List<String> lines,
   required int? selectionStart,
   required int? selectionEnd,
-  required Color selectionColor,
+  required Color selection,
+  required Color onSelection,
 }) {
   if (selectionStart == null ||
       selectionEnd == null ||
@@ -98,7 +99,7 @@ void paintTextWithSelection({
           ? UnicodeWidth.stringWidth(line.substring(0, localSelStart))
           : 0;
       final selectionStyle = (style ?? const TextStyle())
-          .copyWith(backgroundColor: selectionColor);
+          .copyWith(backgroundColor: selection, color: onSelection);
       canvas.drawText(
         offset + Offset(beforeWidth.toDouble(), 0),
         selectedText,
