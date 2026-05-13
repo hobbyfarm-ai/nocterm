@@ -71,8 +71,10 @@ class _MarkdownTextState extends State<MarkdownText> {
   MarkdownStyleSheet? _lastStyleSheet;
 
   List<InlineSpan> _parseMarkdown({int? maxWidth}) {
-    final effectiveStyleSheet =
-        component.styleSheet ?? MarkdownStyleSheet.terminal();
+    final defaults = MarkdownStyleSheet.terminal();
+    final effectiveStyleSheet = component.styleSheet == null
+        ? defaults
+        : defaults.merge(component.styleSheet!);
     final document = md.Document(
       extensionSet: md.ExtensionSet.gitHubFlavored,
       encodeHtml: false,
@@ -195,6 +197,30 @@ class MarkdownStyleSheet {
   final TextStyle? linkStyle;
   final String listBullet;
   final String horizontalRule;
+
+  /// Returns a new style sheet where any field set in [other] overrides the
+  /// corresponding field in this one. Unset fields in [other] keep this
+  /// sheet's value, so partial style sheets layer cleanly on top of defaults.
+  MarkdownStyleSheet merge(MarkdownStyleSheet other) {
+    return MarkdownStyleSheet(
+      h1Style: other.h1Style ?? h1Style,
+      h2Style: other.h2Style ?? h2Style,
+      h3Style: other.h3Style ?? h3Style,
+      h4Style: other.h4Style ?? h4Style,
+      h5Style: other.h5Style ?? h5Style,
+      h6Style: other.h6Style ?? h6Style,
+      paragraphStyle: other.paragraphStyle ?? paragraphStyle,
+      boldStyle: other.boldStyle ?? boldStyle,
+      italicStyle: other.italicStyle ?? italicStyle,
+      strikethroughStyle: other.strikethroughStyle ?? strikethroughStyle,
+      codeStyle: other.codeStyle ?? codeStyle,
+      codeBlockStyle: other.codeBlockStyle ?? codeBlockStyle,
+      blockquoteStyle: other.blockquoteStyle ?? blockquoteStyle,
+      linkStyle: other.linkStyle ?? linkStyle,
+      listBullet: other.listBullet,
+      horizontalRule: other.horizontalRule,
+    );
+  }
 }
 
 /// Visitor that converts markdown AST nodes to TextSpan trees.
