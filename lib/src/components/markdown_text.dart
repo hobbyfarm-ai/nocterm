@@ -66,15 +66,15 @@ class MarkdownText extends StatefulComponent {
 
 class _MarkdownTextState extends State<MarkdownText> {
   List<InlineSpan> _spans = const [];
+  MarkdownStyleSheet? _effectiveStyleSheet;
   int? _lastMaxWidth;
   String? _lastData;
   MarkdownStyleSheet? _lastStyleSheet;
 
-  List<InlineSpan> _parseMarkdown({int? maxWidth}) {
-    final defaults = MarkdownStyleSheet.terminal();
-    final effectiveStyleSheet = component.styleSheet == null
-        ? defaults
-        : defaults.merge(component.styleSheet!);
+  List<InlineSpan> _parseMarkdown({
+    int? maxWidth,
+    required MarkdownStyleSheet effectiveStyleSheet,
+  }) {
     final document = md.Document(
       extensionSet: md.ExtensionSet.gitHubFlavored,
       encodeHtml: false,
@@ -98,11 +98,26 @@ class _MarkdownTextState extends State<MarkdownText> {
           _lastData = component.data;
           _lastStyleSheet = component.styleSheet;
           _lastMaxWidth = maxWidth;
-          _spans = _parseMarkdown(maxWidth: maxWidth);
+          final defaults = MarkdownStyleSheet.terminal();
+          _effectiveStyleSheet = component.styleSheet == null
+              ? defaults
+              : defaults.merge(component.styleSheet!);
+          _spans = _parseMarkdown(
+            maxWidth: maxWidth,
+            effectiveStyleSheet: _effectiveStyleSheet!,
+          );
         }
 
+        // Root span carries paragraphStyle so any element without an
+        // explicit color (headers, code, italics, links, …) inherits the
+        // caller's text color via mergeStyle — rather than falling through
+        // to the terminal's default fg, which would clash with themed
+        // paragraph text and produce a patchy look.
         return RichText(
-          text: TextSpan(children: _spans),
+          text: TextSpan(
+            style: _effectiveStyleSheet?.paragraphStyle,
+            children: _spans,
+          ),
           textAlign: component.textAlign,
           softWrap: component.softWrap,
           overflow: component.overflow,
@@ -135,49 +150,30 @@ class MarkdownStyleSheet {
   });
 
   /// Creates a default style sheet for terminal display.
+  ///
+  /// Defaults are intentionally attribute-only (bold / italic / underline /
+  /// line-through) and carry no foreground/background colors. This lets
+  /// markdown content inherit the caller's [paragraphStyle] color through
+  /// span-level [mergeStyle] so headers, code, italics, etc. blend with
+  /// whatever theme the host app is using instead of snapping to hardcoded
+  /// ANSI colors. Callers that want a richer palette should override the
+  /// relevant fields when constructing their sheet.
   factory MarkdownStyleSheet.terminal() {
     return MarkdownStyleSheet(
-      h1Style: const TextStyle(
-        fontWeight: FontWeight.bold,
-        color: Colors.cyan,
-      ),
-      h2Style: const TextStyle(
-        fontWeight: FontWeight.bold,
-        color: Colors.blue,
-      ),
-      h3Style: const TextStyle(
-        fontWeight: FontWeight.bold,
-        color: Colors.green,
-      ),
-      h4Style: const TextStyle(
-        fontWeight: FontWeight.bold,
-      ),
-      h5Style: const TextStyle(
-        fontWeight: FontWeight.bold,
-      ),
-      h6Style: const TextStyle(
-        fontWeight: FontWeight.bold,
-      ),
+      h1Style: const TextStyle(fontWeight: FontWeight.bold),
+      h2Style: const TextStyle(fontWeight: FontWeight.bold),
+      h3Style: const TextStyle(fontWeight: FontWeight.bold),
+      h4Style: const TextStyle(fontWeight: FontWeight.bold),
+      h5Style: const TextStyle(fontWeight: FontWeight.bold),
+      h6Style: const TextStyle(fontWeight: FontWeight.bold),
       boldStyle: const TextStyle(fontWeight: FontWeight.bold),
       italicStyle: const TextStyle(fontStyle: FontStyle.italic),
       strikethroughStyle:
           const TextStyle(decoration: TextDecoration.lineThrough),
-      codeStyle: const TextStyle(
-        color: Colors.yellow,
-        backgroundColor: Colors.black,
-      ),
-      codeBlockStyle: const TextStyle(
-        color: Colors.green,
-        backgroundColor: Colors.black,
-      ),
-      blockquoteStyle: const TextStyle(
-        color: Colors.grey,
-        fontStyle: FontStyle.italic,
-      ),
-      linkStyle: const TextStyle(
-        color: Colors.blue,
-        decoration: TextDecoration.underline,
-      ),
+      codeStyle: const TextStyle(fontWeight: FontWeight.bold),
+      codeBlockStyle: const TextStyle(fontWeight: FontWeight.bold),
+      blockquoteStyle: const TextStyle(fontStyle: FontStyle.italic),
+      linkStyle: const TextStyle(decoration: TextDecoration.underline),
     );
   }
 
