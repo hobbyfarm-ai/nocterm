@@ -30,20 +30,15 @@ String getNoctermDirectory() {
 String getProjectDirectory() {
   var parent = Directory.current;
   while (true) {
-    final newParent = parent.parent;
-
-    if (newParent == parent) {
-      throw StateError('Could not determine project directory');
-    }
-
     final pubspec = File(p.join(parent.path, 'pubspec.yaml'));
-    if (pubspec.existsSync()) {
-      return parent.path;
-    }
-    if (newParent.path == '/') {
-      return '/';
-    }
+    if (pubspec.existsSync()) return parent.path;
 
+    final newParent = parent.parent;
+    // Compare paths, not Directory identity — terminates at Windows drive
+    // roots where parent.parent returns the same path.
+    if (newParent.path == parent.path) {
+      return Directory.current.path;
+    }
     parent = newParent;
   }
 }
