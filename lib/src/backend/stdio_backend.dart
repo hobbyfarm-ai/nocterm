@@ -12,8 +12,7 @@ import 'win32_ansi_stdin.dart';
 
 // FFI bindings for POSIX `write(2)` so we can bypass `dart:io`'s `IOSink`
 // (which adds buffering + async-encode overhead that's especially costly on
-// linux for large per-frame payloads). On linux/macOS, `libc` / `libSystem`
-// is loaded by default so `DynamicLibrary.process()` resolves `write`.
+// linux for large per-frame payloads).
 typedef _NativeWrite = IntPtr Function(Int32 fd, Pointer<Uint8> buf, IntPtr n);
 typedef _DartWrite = int Function(int fd, Pointer<Uint8> buf, int n);
 
@@ -28,6 +27,29 @@ _DartWrite? _resolveWrite() {
     return null;
   }
 }
+
+// FFI binding for `tcflush(2)`. Used right after `tcsetattr` raw-mode setup
+// to discard any bytes the kernel buffered while stdin was still in cooked
+// mode (e.g., terminal capability-query responses that arrived between
+// process start and raw-mode enable)
+typedef _NativeTcflush = Int32 Function(Int32 fd, Int32 queueSelector);
+typedef _DartTcflush = int Function(int fd, int queueSelector);
+
+final _DartTcflush? _libcTcflush = _resolveTcflush();
+
+_DartTcflush? _resolveTcflush() {
+  if (Platform.isWindows) return null;
+  try {
+    return DynamicLibrary.process()
+        .lookupFunction<_NativeTcflush, _DartTcflush>('tcflush');
+  } on Object {
+    return null;
+  }
+}
+
+// TCIFLUSH = flush input queue (data received but not read).
+// Value differs between BSDs and Linux — macOS uses 1, Linux uses 0.
+int get _tciflush => Platform.isMacOS ? 1 : 0;
 
 /// Backend for native terminal I/O via stdin/stdout.
 /// Handles Unix signals (SIGWINCH, SIGINT, SIGTERM) for resize and shutdown.
@@ -177,6 +199,12 @@ class StdioBackend implements TerminalBackend {
       if (stdin.hasTerminal) {
         stdin.echoMode = false;
         stdin.lineMode = false;
+        // Discard any bytes that landed in the kernel's input queue while
+        // stdin was still in cooked mode.
+        final tcflush = _libcTcflush;
+        if (tcflush != null) {
+          tcflush(0, _tciflush);
+        }
       }
     } catch (e) {
       // Ignore errors in CI/CD or when piping

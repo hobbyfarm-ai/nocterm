@@ -45,6 +45,14 @@ class TerminalBinding extends NoctermBinding
 
   /// Timeout for stale buffer detection (100ms)
   static const _bufferStaleTimeout = Duration(milliseconds: 100);
+
+  /// Pending timer that fires if the parser holds a lone ESC byte and no
+  /// follow-up arrives. Cancelled at the top of every input batch.
+  Timer? _loneEscapeTimer;
+
+  /// How long to wait after a lone ESC before committing it as a
+  /// standalone Escape key.
+  static const _loneEscapeTimeout = Duration(milliseconds: 25);
   final _mouseTracker = MouseTracker();
   final _oscEventsController = StreamController<String>.broadcast();
 
@@ -161,6 +169,20 @@ class TerminalBinding extends NoctermBinding
       terminal.flush();
     });
 
+    // Raw mode FIRST, before writing any startup escape sequences. Order
+    // matters: Terminal may emit a response to some of
+    // the sequences we're about to write — pushing kitty keyboard, the
+    // mouse-tracking enables, etc. If those responses arrive while stdin
+    // is still in cooked mode, they sit in the kernel's line-discipline
+    // buffer and get delivered to the parser as the first input bytes,
+    // wedging arrow-key parsing for the rest of the session. Putting raw
+    // mode first (and tcflush-ing immediately after) drains that window.
+    try {
+      terminal.backend.enableRawMode();
+    } catch (e) {
+      // Ignore errors when running without a proper terminal (CI, pipes).
+    }
+
     // Enable mouse tracking (SGR mode for better coordinate support)
     // ESC [ ? 1000 h - Send Mouse X & Y on button press and release
     // ESC [ ? 1002 h - Use Cell Motion Mouse Tracking
@@ -188,7 +210,7 @@ class TerminalBinding extends NoctermBinding
     // Store initial size
     _lastKnownSize = terminal.size;
 
-    // Start listening for keyboard input
+    // Attach stdin listener (raw mode was enabled above).
     _startInputHandling();
 
     // Start listening for terminal resize events
@@ -205,16 +227,20 @@ class TerminalBinding extends NoctermBinding
       throw StateError('Terminal backend does not provide input stream');
     }
 
-    // Enable raw mode via backend
-    try {
-      terminal.backend.enableRawMode();
-    } catch (e) {
-      // Ignore errors when running without a proper terminal
-      // This happens in CI/CD environments or when piping output
-    }
+    // Raw mode is already enabled by initialize() before any startup
+    // escape sequences are written. Don't re-enter it here — doing so
+    // would clobber the cleanly-drained state.
 
     // Listen for input at the byte level for proper escape sequence handling
     _inputSubscription = inputStream.listen((bytes) {
+      // New bytes arriving means the deferred-ESC window is moot: either
+      // the new bytes complete a sequence (in which case we don't want to
+      // also commit a phantom Escape), or they're a fresh keystroke (in
+      // which case the old lone ESC was real and the parser will commit
+      // it when it sees the buffer can't form a sequence).
+      _loneEscapeTimer?.cancel();
+      _loneEscapeTimer = null;
+
       // Extract OSC sequences from input stream:
       // - Normal mode: Terminal emulator responses (color queries, clipboard, etc.)
       // - Shell mode: Above + custom protocol (e.g., OSC 9999 size updates)
@@ -300,6 +326,14 @@ class TerminalBinding extends NoctermBinding
         scheduleFrame();
       }
 
+      // If the parser is holding a lone ESC waiting to disambiguate,
+      // arm the timer. If more bytes arrive in time we cancel it at the
+      // top of the next listener tick; if not, the timeout commits the
+      // standalone Escape event.
+      if (_inputParser.hasPendingLoneEscape) {
+        _loneEscapeTimer = Timer(_loneEscapeTimeout, _flushLoneEscape);
+      }
+
       // Also add raw string for backwards compatibility
       try {
         final str = utf8.decode(bytes);
@@ -308,6 +342,20 @@ class TerminalBinding extends NoctermBinding
         // Ignore decode errors for escape sequences
       }
     });
+  }
+
+  /// Fires when [_loneEscapeTimeout] elapses with no further input after a
+  /// deferred ESC. Commits the lone Escape event and routes it.
+  void _flushLoneEscape() {
+    _loneEscapeTimer = null;
+    final event = _inputParser.flushLoneEscape();
+    if (event == null) return;
+    _keyboardEventController.add(event);
+    if (_handleDebugKeyEvent(event)) return;
+    _routeKeyboardEvent(event);
+    if (buildOwner.hasDirtyElements) {
+      scheduleFrame();
+    }
   }
 
   /// Process bytes in shell mode to extract terminal size OSC sequences
@@ -535,6 +583,7 @@ class TerminalBinding extends NoctermBinding
 
     // Cancel all subscriptions immediately
     pendingFrameTimer?.cancel();
+    _loneEscapeTimer?.cancel();
     _inputSubscription?.cancel();
     _resizeSubscription?.cancel();
     _shutdownSubscription?.cancel();
@@ -824,6 +873,7 @@ class TerminalBinding extends NoctermBinding
     // Must happen before any subscription cancels — see [_restoreRawMode].
     _restoreRawMode();
 
+    _loneEscapeTimer?.cancel();
     _inputSubscription?.cancel();
     _resizeSubscription?.cancel();
 

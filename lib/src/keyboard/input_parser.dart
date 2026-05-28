@@ -276,14 +276,13 @@ class InputParser {
 
   (KeyboardEvent, int)? _parseEscapeSequence() {
     if (_buffer.length == 1) {
-      // Just ESC key pressed
-      return (
-        KeyboardEvent(
-          logicalKey: LogicalKey.escape,
-          modifiers: const ModifierKeys(),
-        ),
-        1
-      );
+      // ESC alone — ambiguous. Could be a standalone Escape press, or
+      // the first byte of a longer sequence (arrow key, function key,
+      // Alt+chord) whose remainder hasn't arrived yet because the kernel
+      // split the read. Return null and wait. The binding fires a short
+      // timeout (see [flushLoneEscape]) to commit ESC if no more bytes
+      // arrive in time.
+      return null;
     }
 
     // Check for Alt+key combinations (ESC followed by character)
@@ -942,5 +941,25 @@ class InputParser {
   /// Clear any buffered input
   void clear() {
     _buffer.clear();
+  }
+
+  /// True iff the buffer holds exactly one `0x1B` byte — i.e. an ESC the
+  /// parser deferred because it can't yet tell whether it's a standalone
+  /// Escape press or the prefix of a longer sequence.
+  bool get hasPendingLoneEscape =>
+      _buffer.length == 1 && _buffer[0] == 0x1B;
+
+  /// Commit the deferred lone ESC as a standalone Escape event and clear
+  /// it from the buffer. Returns null if the buffer no longer matches —
+  /// e.g. more bytes arrived (and the sequence already parsed) or the
+  /// buffer was cleared by [clear]. Called by the binding when the
+  /// ESC-ambiguity timer fires.
+  KeyboardEvent? flushLoneEscape() {
+    if (!hasPendingLoneEscape) return null;
+    _buffer.clear();
+    return KeyboardEvent(
+      logicalKey: LogicalKey.escape,
+      modifiers: const ModifierKeys(),
+    );
   }
 }
