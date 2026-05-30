@@ -1923,12 +1923,11 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
   ) {
     switch (_cursorStyle) {
       case CursorStyle.block:
-        // Filled block - traditional terminal cursor
-        final blockStyle = TextStyle(
-          color: Colors.black,
-          backgroundColor: cursorColor,
+        canvas.drawText(
+          position,
+          charUnderCursor,
+          style: _blockCursorStyle(cursorColor),
         );
-        canvas.drawText(position, charUnderCursor, style: blockStyle);
         break;
 
       case CursorStyle.underline:
@@ -1942,14 +1941,34 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
         break;
 
       case CursorStyle.blockOutline:
-        // Draw block outline - invert the colors
-        final outlineStyle = TextStyle(
-          color: Colors.black,
-          backgroundColor: cursorColor,
+        canvas.drawText(
+          position,
+          charUnderCursor,
+          style: _blockCursorStyle(cursorColor),
         );
-        canvas.drawText(position, charUnderCursor, style: outlineStyle);
         break;
     }
+  }
+
+  /// Picks the style for a filled-block cursor.
+  ///
+  /// When no [_cursorColor] was set explicitly, we let the terminal do the
+  /// inversion: emit only `reverse: true` so [_blendStyle] preserves the
+  /// underlying cell's fg/bg and SGR 7 swaps them at the terminal layer.
+  /// This is what "the cursor inverts the cell it's over" actually means —
+  /// the placeholder/text glyph stays visible inside the block with its
+  /// own colors flipped, instead of being clobbered by a fixed pair.
+  ///
+  /// When the caller picked an explicit color, honor it as the background
+  /// and derive the foreground from its perceived luminance so the glyph
+  /// stays readable regardless of which color was chosen.
+  TextStyle _blockCursorStyle(Color cursorColor) {
+    if (_cursorColor == null) {
+      return const TextStyle(reverse: true);
+    }
+    final fg =
+        cursorColor.computeLuminance() > 0.5 ? Colors.black : Colors.white;
+    return TextStyle(color: fg, backgroundColor: cursorColor);
   }
 }
 

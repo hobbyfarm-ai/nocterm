@@ -194,6 +194,18 @@ class Color {
   /// The blue channel, as a double from 0.0 to 1.0.
   double get b => blue / 255.0;
 
+  /// Returns a brightness value between 0 (darkest) and 1 (lightest) for
+  /// this color, using sRGB perceived-luminance weights (Rec. 709). For
+  /// [defaultColor] returns 0.5 — the real terminal background is
+  /// unknown, so split the difference.
+  ///
+  /// Mirrors Flutter's `Color.computeLuminance()` API. Handy for picking
+  /// a contrasting foreground (e.g. black-on-light, white-on-dark).
+  double computeLuminance() {
+    if (isDefault) return 0.5;
+    return (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255.0;
+  }
+
   /// Returns a new color with the given opacity.
   ///
   /// The [opacity] must be between 0.0 (fully transparent) and 1.0 (fully opaque).
