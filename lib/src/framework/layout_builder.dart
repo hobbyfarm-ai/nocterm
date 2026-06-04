@@ -72,14 +72,18 @@ class LayoutBuilderElement extends RenderObjectElement {
 
   @override
   void update(Component newComponent) {
-    final oldBuilder = component.builder;
     super.update(newComponent);
     _needsBuild = true;
-    // A fresh builder closure captures whatever state the parent saw this build pass.
-    // Hence identity compare is a cheap proxy for "captured state may differ".
-    if (!identical(oldBuilder, component.builder)) {
-      renderObject.markNeedsLayout();
-    }
+    // update() only runs when the component instance actually changed
+    // (identical components short-circuit in updateChild). The builder runs
+    // during layout, so the new component can only take effect if a layout
+    // pass happens. Builder identity is no proxy for content: a stable
+    // (hoisted) closure can read state that changed this build pass, so
+    // there is no narrower safe gate than always marking. This matches
+    // Flutter's _LayoutBuilderElement.update and cannot loop: marking
+    // layout dirty never dirties an element, so a frame with no dirty
+    // elements goes idle.
+    renderObject.markNeedsLayout();
   }
 
   @override

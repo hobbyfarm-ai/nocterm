@@ -346,15 +346,21 @@ class _ListViewportElement extends RenderObjectElement {
 
   @override
   void update(Component newComponent) {
-    final oldViewport = component;
     super.update(newComponent);
 
     final newViewport = newComponent as _ListViewport;
 
     // Remove cached children that are beyond the new item count.
+    // Items are keyed by index, separators by -index - 1 (a separator
+    // follows every item except the last, so valid separator indices are
+    // 0..itemCount - 2).
     final newItemCount = newViewport.itemCount;
     if (newItemCount != null) {
-      _children.removeWhere((index, _) => index >= 0 && index >= newItemCount);
+      _children.removeWhere((key, _) {
+        if (key >= 0) return key >= newItemCount;
+        final separatorIndex = -key - 1;
+        return separatorIndex >= newItemCount - 1;
+      });
     }
 
     // Mark that children need to be updated with new props
@@ -362,12 +368,15 @@ class _ListViewportElement extends RenderObjectElement {
     _needsChildUpdate = true;
     _updatedThisLayout.clear();
 
-    final layoutAffectingChanged = oldViewport.itemCount != newItemCount ||
-        !identical(oldViewport.itemBuilder, newViewport.itemBuilder) ||
-        !identical(oldViewport.separatorBuilder, newViewport.separatorBuilder);
-    if (layoutAffectingChanged) {
-      renderObject.markNeedsLayout();
-    }
+    // update() only runs when the viewport component actually changed
+    // (identical components short-circuit in updateChild). Children are
+    // built during layout, so the changed component can only take effect
+    // if a layout pass happens. Builder identity is no proxy for content -
+    // a stable (hoisted) itemBuilder can read state that changed this
+    // build pass - so there is no narrower safe gate than always marking.
+    // This cannot loop: marking layout dirty never dirties an element, so
+    // a frame with no dirty elements goes idle.
+    renderObject.markNeedsLayout();
   }
 
   /// Called by RenderListViewport after layout completes to reset update flags.
