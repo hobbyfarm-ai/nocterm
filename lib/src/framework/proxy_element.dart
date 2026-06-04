@@ -93,7 +93,11 @@ class ParentDataElement<T extends ParentData> extends ProxyElement {
           // If so, copy the positioning properties instead of replacing
           if (existingData.runtimeType != newData.runtimeType &&
               _copyStackParentDataIfApplicable(existingData, newData)) {
-            // Properties were copied, don't replace
+            // Properties were copied in place, don't replace. The new
+            // positioning is only applied by the parent's performLayout,
+            // so the parent must be marked dirty just like the
+            // replacement path below.
+            renderObject.parent?.markNeedsLayout();
             return;
           }
         }
