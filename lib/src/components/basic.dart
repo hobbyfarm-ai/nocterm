@@ -475,9 +475,17 @@ class RenderConstrainedBox extends RenderObject
 
 class RenderPadding extends RenderObject
     with RenderObjectWithChildMixin<RenderObject> {
-  RenderPadding({required this.padding});
+  RenderPadding({required EdgeInsets padding}) : _padding = padding;
 
-  EdgeInsets padding;
+  EdgeInsets get padding => _padding;
+  EdgeInsets _padding;
+  set padding(EdgeInsets value) {
+    if (_padding == value) {
+      return;
+    }
+    _padding = value;
+    markNeedsLayout();
+  }
 
   @override
   void setupParentData(RenderObject child) {
@@ -523,14 +531,42 @@ class RenderPadding extends RenderObject
 class RenderPositionedBox extends RenderObject
     with RenderObjectWithChildMixin<RenderObject> {
   RenderPositionedBox({
-    required this.alignment,
-    this.widthFactor,
-    this.heightFactor,
-  });
+    required AlignmentGeometry alignment,
+    double? widthFactor,
+    double? heightFactor,
+  })  : _alignment = alignment,
+        _widthFactor = widthFactor,
+        _heightFactor = heightFactor;
 
-  AlignmentGeometry alignment;
-  double? widthFactor;
-  double? heightFactor;
+  AlignmentGeometry get alignment => _alignment;
+  AlignmentGeometry _alignment;
+  set alignment(AlignmentGeometry value) {
+    if (_alignment == value) {
+      return;
+    }
+    _alignment = value;
+    markNeedsLayout();
+  }
+
+  double? get widthFactor => _widthFactor;
+  double? _widthFactor;
+  set widthFactor(double? value) {
+    if (_widthFactor == value) {
+      return;
+    }
+    _widthFactor = value;
+    markNeedsLayout();
+  }
+
+  double? get heightFactor => _heightFactor;
+  double? _heightFactor;
+  set heightFactor(double? value) {
+    if (_heightFactor == value) {
+      return;
+    }
+    _heightFactor = value;
+    markNeedsLayout();
+  }
 
   @override
   void setupParentData(RenderObject child) {

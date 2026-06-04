@@ -243,6 +243,19 @@ class EdgeInsets {
   final double bottom;
 
   static const EdgeInsets zero = EdgeInsets.only();
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is EdgeInsets &&
+        other.left == left &&
+        other.top == top &&
+        other.right == right &&
+        other.bottom == bottom;
+  }
+
+  @override
+  int get hashCode => Object.hash(left, top, right, bottom);
 }
 
 /// Base class for parent data
@@ -771,6 +784,9 @@ mixin ContainerRenderObjectMixin<ChildType extends RenderObject>
         _children.insert(index + 1, child);
       }
     }
+    // Child order determines layout (e.g. Flex offsets), so a reorder must
+    // re-run performLayout - paint order alone is not enough.
+    markNeedsLayout();
   }
 
   void removeAll() {
