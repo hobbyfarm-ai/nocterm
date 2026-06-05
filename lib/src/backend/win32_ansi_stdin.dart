@@ -277,17 +277,24 @@ class Win32AnsiStdin extends Stream<List<int>> implements Stdin {
       button = wheelDelta > 32767 ? 67 : 66;
       suffix = 'M';
     } else if (eventFlags & _mouseMoved != 0) {
-      // Motion event
+      // Motion event. Windows reports every pixel of mouse movement,
+      // including hover. The Linux path enables SGR all-motion tracking
+      // (mode 1003), which the terminal emits as button code 35 (motion
+      // flag 0x20 plus base button 3 = no button held). MouseParser
+      // already classifies button 35 as a hover event, so emitting the
+      // same code here keeps the two backends in lock-step and lets
+      // MouseRegion / onHover work on Windows.
       if (buttonState != 0) {
-        // Motion with button down
+        // Drag: motion with one or more buttons held.
         button = 32;
         if (buttonState & _fromLeft1stButtonPressed != 0) button += 0;
         if (buttonState & _rightmostButtonPressed != 0) button += 2;
         if (buttonState & _fromLeft2ndButtonPressed != 0) button += 1;
         suffix = 'M';
       } else {
-        // Motion without button - don't report
-        return [];
+        // Hover: motion with no buttons held. SGR button 35.
+        button = 35;
+        suffix = 'M';
       }
     } else {
       // Button event
