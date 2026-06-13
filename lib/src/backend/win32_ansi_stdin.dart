@@ -54,7 +54,21 @@ class Win32AnsiStdin extends Stream<List<int>> implements Stdin {
   void startEventLoop() {
     if (_running) return;
     _running = true;
+    // Dart's stdin.lineMode = false clears ENABLE_PROCESSED_INPUT, which is
+    // what makes Windows generate SIGINT for Ctrl+C.
+    _ensureProcessedInput();
     _eventLoop();
+  }
+
+  void _ensureProcessedInput() {
+    final modePtr = calloc<Uint32>();
+    try {
+      if (_getConsoleMode(_inputHandle, modePtr) != 0) {
+        _setConsoleMode(_inputHandle, modePtr.value | _enableProcessedInput);
+      }
+    } finally {
+      calloc.free(modePtr);
+    }
   }
 
   Future<void> _eventLoop() async {
@@ -63,12 +77,16 @@ class Win32AnsiStdin extends Stream<List<int>> implements Stdin {
 
     try {
       while (_running) {
-        // Yield to Dart event loop
         await Future.delayed(Duration.zero);
-
         if (!_running) break;
 
-        // Read one input event
+        // Bounded wait keeps the Dart event loop responsive. Without this,
+        // ReadConsoleInputW parks the isolate until the next keystroke,
+        // starving timers and signal handlers.
+        final waitResult = _waitForSingleObject(_inputHandle, _pollIntervalMs);
+        if (!_running) break;
+        if (waitResult != _waitObject0) continue;
+
         final result =
             _readConsoleInputW(_inputHandle, pInputRecord, 1, pEventsRead);
         if (result != 0 && pEventsRead.value > 0) {
@@ -377,9 +395,16 @@ class Win32AnsiStdin extends Stream<List<int>> implements Stdin {
 
 // Windows API Constants
 const int _stdInputHandle = -10;
+const int _enableProcessedInput = 0x0001;
 const int _enableMouseInput = 0x0010;
 const int _enableExtendedFlags = 0x0080;
 const int _enableQuickEditMode = 0x0040;
+
+// WaitForSingleObject return value: object is signaled.
+const int _waitObject0 = 0x00000000;
+
+// 16ms poll keeps the input loop responsive.
+const int _pollIntervalMs = 16;
 
 // Event types
 const int _keyEvent = 0x0001;
@@ -494,6 +519,11 @@ typedef _ReadConsoleInputDart = int Function(
     int nLength,
     Pointer<Uint32> lpNumberOfEventsRead);
 
+typedef _WaitForSingleObjectNative = Uint32 Function(
+    IntPtr hHandle, Uint32 dwMilliseconds);
+typedef _WaitForSingleObjectDart = int Function(
+    int hHandle, int dwMilliseconds);
+
 final _kernel32 = DynamicLibrary.open('kernel32.dll');
 
 final _getStdHandle = _kernel32
@@ -510,3 +540,7 @@ final _setConsoleMode =
 final _readConsoleInputW =
     _kernel32.lookupFunction<_ReadConsoleInputNative, _ReadConsoleInputDart>(
         'ReadConsoleInputW');
+
+final _waitForSingleObject = _kernel32.lookupFunction<
+    _WaitForSingleObjectNative,
+    _WaitForSingleObjectDart>('WaitForSingleObject');
