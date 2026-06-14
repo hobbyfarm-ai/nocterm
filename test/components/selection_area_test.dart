@@ -1507,6 +1507,117 @@ void main() {
         },
       );
     });
+
+    // --- Edge auto-scroll during selection drag (PR #81) ---
+    //
+    // Container height does not constrain the scroll viewport in the test
+    // harness (it fills the full 24-row terminal), so these use 40 rows of
+    // content to guarantee a scrollable extent and target the real viewport
+    // edge at row 23.
+
+    test(
+        'drag to the bottom edge auto-scrolls the viewport; mid-viewport '
+        'motion does not', () async {
+      await testNocterm(
+        'edge auto-scroll bottom',
+        (tester) async {
+          final controller = ScrollController();
+
+          await tester.pumpComponent(
+            SelectionArea(
+              child: SingleChildScrollView(
+                controller: controller,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (int i = 0; i < 40; i++)
+                      Text('Line${i.toString().padLeft(2, '0')}'),
+                  ],
+                ),
+              ),
+            ),
+          );
+
+          // 40 rows of content in the 24-row viewport leaves room to scroll.
+          expect(controller.maxScrollExtent, greaterThan(0));
+          expect(controller.offset, equals(0));
+
+          // Begin a drag in the neutral middle of the viewport.
+          await tester.press(0, 10);
+
+          // Motion that stays in the neutral middle must NOT auto-scroll.
+          await tester.sendMouseEvent(const MouseEvent(
+            button: MouseButton.left,
+            x: 4,
+            y: 10,
+            pressed: true,
+            isMotion: true,
+          ));
+          expect(controller.offset, equals(0),
+              reason: 'no auto-scroll while the pointer is away from an edge');
+
+          // Motion to the bottom edge row fires edge auto-scroll. The first
+          // tick runs synchronously, advancing the viewport downward.
+          await tester.sendMouseEvent(const MouseEvent(
+            button: MouseButton.left,
+            x: 4,
+            y: 23,
+            pressed: true,
+            isMotion: true,
+          ));
+          expect(controller.offset, greaterThan(0),
+              reason: 'dragging to the bottom edge should auto-scroll down');
+
+          await tester.release(4, 23);
+        },
+      );
+    });
+
+    test('edge auto-scroll stops once the drag is released', () async {
+      await testNocterm(
+        'edge auto-scroll stops on release',
+        (tester) async {
+          final controller = ScrollController();
+
+          await tester.pumpComponent(
+            SelectionArea(
+              child: SingleChildScrollView(
+                controller: controller,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (int i = 0; i < 40; i++)
+                      Text('Row${i.toString().padLeft(2, '0')}'),
+                  ],
+                ),
+              ),
+            ),
+          );
+
+          await tester.press(0, 10);
+          await tester.sendMouseEvent(const MouseEvent(
+            button: MouseButton.left,
+            x: 4,
+            y: 23,
+            pressed: true,
+            isMotion: true,
+          ));
+          expect(controller.offset, greaterThan(0));
+
+          // Releasing ends the drag and must cancel the auto-scroll loop.
+          await tester.release(4, 23);
+          final offsetAtRelease = controller.offset;
+
+          // Further frames must not keep scrolling now that the drag is over.
+          await tester.pump();
+          await tester.pump();
+          await tester.pump();
+
+          expect(controller.offset, equals(offsetAtRelease),
+              reason: 'auto-scroll must not run after the drag ends');
+        },
+      );
+    });
   });
 }
 
