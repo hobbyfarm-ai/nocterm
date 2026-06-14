@@ -4,7 +4,6 @@ class EscapeCodes {
   static const disable = _Disable._();
   static const enable = _Enable._();
 
-  static const resetDeviceAttributes = '\x1B[c';
   static const hideCursor = '\x1b[?25l';
   static const showCursor = '\x1b[?25h';
   static const clearScreen = '\x1b[2J';

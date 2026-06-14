@@ -859,10 +859,6 @@ class TerminalBinding extends NoctermBinding
       terminal.backend.writeRaw(EscapeCodes.disable.buttonEventTracking);
       terminal.backend.writeRaw(EscapeCodes.disable.basicMouseTracking);
 
-      // Send a terminal reset sequence as a final safety measure
-      // This helps ensure the terminal is in a clean state
-      terminal.backend.writeRaw(EscapeCodes.resetDeviceAttributes);
-
       terminal.clear();
 
       // Final flush to ensure all cleanup is complete
