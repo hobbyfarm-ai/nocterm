@@ -1750,13 +1750,14 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
       }
 
       charCount += lineLength;
-      // Only add 1 for actual newline characters, not wrapped lines
-      // Check if the accumulated text so far ends with a newline
-      if (i < lines.length - 1) {
-        final textSoFar = _text.substring(0, math.min(charCount, _text.length));
-        if (textSoFar.endsWith('\n')) {
-          charCount++; // Account for the newline character
-        }
+      // Only add 1 for actual newline characters, not wrapped lines.
+      // Check the character right after this line's content in the
+      // original text — if it's a newline, the layout engine split
+      // on it, so we must account for the extra byte.
+      if (i < lines.length - 1 &&
+          charCount < _text.length &&
+          _text[charCount] == '\n') {
+        charCount++;
       }
     }
   }
