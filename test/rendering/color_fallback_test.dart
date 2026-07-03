@@ -13,8 +13,7 @@ void main() {
       // falls through to the 24-bit truecolor encoding.
       const color = Color.fromRGB(231, 97, 112);
       expect(color.toAnsi(), equals('\x1b[38;2;231;97;112m'));
-      expect(
-          color.toAnsi(background: true), equals('\x1b[48;2;231;97;112m'));
+      expect(color.toAnsi(background: true), equals('\x1b[48;2;231;97;112m'));
     });
 
     test('prefers shorter 256-color SGR for exact palette matches', () {

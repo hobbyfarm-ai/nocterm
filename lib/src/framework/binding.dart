@@ -87,8 +87,11 @@ abstract class NoctermBinding {
 
   void attachRootComponent(Component rootComponent) {
     if (_rootElement != null) {
-      _rootElement!.deactivate();
-      _rootElement!.unmount();
+      // Deactivate and unmount the whole old tree (disposing its render
+      // objects) — unmounting only the root leaves ghost render objects that
+      // keep receiving mouse events and hold resources.
+      buildOwner._inactiveElements.add(_rootElement!);
+      buildOwner.finalizeTree();
     }
     _rootElement = rootComponent.createElement();
     // Set the owner before mounting (root has no parent to inherit from)

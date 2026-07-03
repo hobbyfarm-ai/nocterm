@@ -2,8 +2,9 @@ import 'dart:async';
 
 import 'package:nocterm/nocterm.dart';
 import 'package:nocterm/src/framework/terminal_canvas.dart';
-import 'package:nocterm/src/rendering/mouse_hit_test.dart';
 import 'package:nocterm/src/rendering/mouse_tracker.dart';
+
+import '../binding/mouse_router.dart';
 
 import '../backend/terminal.dart' as term;
 import '../buffer.dart' as buf;
@@ -11,7 +12,8 @@ import 'dart:typed_data';
 
 /// Test binding for TUI applications that provides controlled frame rendering
 /// and state inspection capabilities for testing.
-class NoctermTestBinding extends NoctermBinding with SchedulerBinding {
+class NoctermTestBinding extends NoctermBinding
+    with SchedulerBinding, MouseRouter {
   NoctermTestBinding({
     term.Terminal? terminal,
     this.size = const Size(80, 24),
@@ -52,6 +54,9 @@ class NoctermTestBinding extends NoctermBinding with SchedulerBinding {
   /// Mouse tracker for managing mouse annotations
   final _mouseTracker = MouseTracker();
 
+  @override
+  MouseTracker get mouseTracker => _mouseTracker;
+
   /// Number of frames that have been rendered
   int _frameCount = 0;
   int get frameCount => _frameCount;
@@ -77,7 +82,7 @@ class NoctermTestBinding extends NoctermBinding with SchedulerBinding {
     // Process any pending mouse events
     while (_pendingMouseEvents.isNotEmpty) {
       final event = _pendingMouseEvents.removeAt(0);
-      _routeMouseEvent(event);
+      routeMouseEvent(event);
     }
 
     // Execute a frame using the scheduler
@@ -244,35 +249,6 @@ class NoctermTestBinding extends NoctermBinding with SchedulerBinding {
   }
 
   /// Route a mouse event through the component tree
-  void _routeMouseEvent(MouseEvent event) {
-    if (rootElement == null) return;
-
-    // Find the render object in the tree
-    final renderObject = _findRenderObjectInTree(rootElement!);
-    if (renderObject != null) {
-      final hitTestResult = MouseHitTestResult();
-      final position = Offset(event.x.toDouble(), event.y.toDouble());
-
-      // Perform hit test from the root render object
-      renderObject.hitTest(hitTestResult, position: position);
-
-      // Update mouse tracker with hit test results
-      _mouseTracker.updateAnnotations(hitTestResult, event);
-    }
-  }
-
-  /// Find the render object in the element tree
-  RenderObject? _findRenderObjectInTree(Element element) {
-    if (element is RenderObjectElement) {
-      return element.renderObject;
-    }
-    RenderObject? result;
-    element.visitChildren((child) {
-      result ??= _findRenderObjectInTree(child);
-    });
-    return result;
-  }
-
   /// Dispatch a keyboard event to an element and its children
   bool _dispatchRawInput(List<int> bytes) {
     if (rootElement == null) return false;

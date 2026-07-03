@@ -109,14 +109,26 @@ class MouseTracker {
     _pressedButtons.clear();
   }
 
-  /// Track pressed buttons from non-motion press/release events.
+  /// Track pressed buttons from press/release and motion events.
+  ///
+  /// SGR motion events carry authoritative button state: a drag motion
+  /// reports the held button, and a no-button motion (code 35) reports that
+  /// nothing is held. Using both heals stale state when a release happened
+  /// outside the terminal window and was never delivered.
   void _updatePressedButtons(MouseEvent event) {
-    // Ignore wheel and motion-only events
     if (event.button == MouseButton.wheelUp ||
         event.button == MouseButton.wheelDown) {
       return;
     }
-    if (event.isMotion) return;
+
+    if (event.isMotion) {
+      if (event.pressed) {
+        _pressedButtons.add(event.button);
+      } else {
+        _pressedButtons.clear();
+      }
+      return;
+    }
 
     if (event.pressed) {
       _pressedButtons.add(event.button);

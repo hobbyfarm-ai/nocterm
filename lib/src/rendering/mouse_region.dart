@@ -88,6 +88,14 @@ class RenderMouseRegion extends RenderObject
   }
 
   @override
+  void dispose() {
+    // Unmount disposes without detaching; stale annotations must not keep
+    // receiving events from the mouse tracker's hovered set.
+    _annotation?.validForMouseTracker = false;
+    super.dispose();
+  }
+
+  @override
   void setupParentData(RenderObject child) {
     if (child.parentData is! BoxParentData) {
       child.parentData = BoxParentData();

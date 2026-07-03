@@ -5,19 +5,19 @@ import 'package:nocterm/nocterm.dart';
 import 'package:nocterm/src/framework/terminal_canvas.dart';
 import 'package:nocterm/src/image/image_cleanup.dart';
 import 'package:nocterm/src/navigation/render_theater.dart';
-import 'package:nocterm/src/rendering/scrollable_render_object.dart';
 
 import '../backend/terminal.dart' as term;
 import '../buffer.dart' as buf;
 import '../keyboard/input_event.dart';
 import '../keyboard/input_parser.dart';
-import '../rendering/mouse_hit_test.dart';
+import '../keyboard/osc_scanner.dart';
 import '../rendering/mouse_tracker.dart';
 import 'hot_reload_mixin.dart';
+import 'mouse_router.dart';
 
 /// Terminal UI binding that handles terminal input/output and event loop
 class TerminalBinding extends NoctermBinding
-    with SchedulerBinding, HotReloadBinding {
+    with SchedulerBinding, HotReloadBinding, MouseRouter {
   TerminalBinding(this.terminal) {
     _instance = this;
     _initializePipelineOwner();
@@ -38,13 +38,11 @@ class TerminalBinding extends NoctermBinding
   final _inputController = StreamController<String>.broadcast();
   final _keyboardEventController = StreamController<KeyboardEvent>.broadcast();
   final _inputParser = InputParser();
+  late final _oscScanner = OscScanner(
+    onOsc: (content) =>
+        _handleOscSequence(utf8.decode(content, allowMalformed: true)),
+  );
   final _mouseEventController = StreamController<MouseEvent>.broadcast();
-
-  /// Timestamp of last input bytes added to parser (for buffer staleness detection)
-  DateTime? _lastInputTime;
-
-  /// Timeout for stale buffer detection (100ms)
-  static const _bufferStaleTimeout = Duration(milliseconds: 100);
 
   /// Pending timer that fires if the parser holds a lone ESC byte and no
   /// follow-up arrives. Cancelled at the top of every input batch.
@@ -54,6 +52,9 @@ class TerminalBinding extends NoctermBinding
   /// standalone Escape key.
   static const _loneEscapeTimeout = Duration(milliseconds: 25);
   final _mouseTracker = MouseTracker();
+
+  @override
+  MouseTracker get mouseTracker => _mouseTracker;
   final _oscEventsController = StreamController<String>.broadcast();
 
   /// Previous frame's buffer for differential rendering.
@@ -244,17 +245,9 @@ class TerminalBinding extends NoctermBinding
       // Extract OSC sequences from input stream:
       // - Normal mode: Terminal emulator responses (color queries, clipboard, etc.)
       // - Shell mode: Above + custom protocol (e.g., OSC 9999 size updates)
-      bytes = _processOscSequences(bytes);
-
-      // Check for stale buffer - if too much time has passed since last input,
-      // clear any incomplete sequences that may be blocking the parser.
-      // This handles edge cases where rapid key sequences get corrupted.
-      final now = DateTime.now();
-      if (_lastInputTime != null &&
-          now.difference(_lastInputTime!) > _bufferStaleTimeout) {
-        _inputParser.clear();
-      }
-      _lastInputTime = now;
+      // The scanner holds partial sequences (including a chunk-final ESC)
+      // across reads so their bytes never leak into the input parser.
+      bytes = _oscScanner.filter(bytes);
 
       // Check for raw input listeners before parsing. If an
       // InputListener consumes the bytes, skip the parser.
@@ -304,7 +297,7 @@ class TerminalBinding extends NoctermBinding
           _mouseEventController.add(mouseEvent);
 
           // Route the mouse event through the component tree
-          _routeMouseEvent(mouseEvent);
+          routeMouseEvent(mouseEvent);
         } else if (event is PasteInputEvent) {
           // Handle bracketed paste (or batched characters): copy to clipboard then send Ctrl+V
           ClipboardManager.copy(event.text);
@@ -326,11 +319,11 @@ class TerminalBinding extends NoctermBinding
         scheduleFrame();
       }
 
-      // If the parser is holding a lone ESC waiting to disambiguate,
-      // arm the timer. If more bytes arrive in time we cancel it at the
-      // top of the next listener tick; if not, the timeout commits the
-      // standalone Escape event.
-      if (_inputParser.hasPendingLoneEscape) {
+      // If the parser (or the OSC scanner, which holds chunk-final ESCs) is
+      // holding a lone ESC waiting to disambiguate, arm the timer. If more
+      // bytes arrive in time we cancel it at the top of the next listener
+      // tick; if not, the timeout commits the standalone Escape event.
+      if (_inputParser.hasPendingLoneEscape || _oscScanner.hasPendingEsc) {
         _loneEscapeTimer = Timer(_loneEscapeTimeout, _flushLoneEscape);
       }
 
@@ -348,6 +341,11 @@ class TerminalBinding extends NoctermBinding
   /// deferred ESC. Commits the lone Escape event and routes it.
   void _flushLoneEscape() {
     _loneEscapeTimer = null;
+    // A chunk-final ESC held by the OSC scanner turned out to be a real
+    // Escape keypress: move it into the parser so it can commit it.
+    if (_oscScanner.hasPendingEsc) {
+      _inputParser.addBytes(_oscScanner.takePendingEsc());
+    }
     final event = _inputParser.flushLoneEscape();
     if (event == null) return;
     _keyboardEventController.add(event);
@@ -360,57 +358,6 @@ class TerminalBinding extends NoctermBinding
 
   /// Process bytes in shell mode to extract terminal size OSC sequences
   /// Returns filtered bytes with OSC sequences removed
-  List<int> _processOscSequences(List<int> bytes) {
-    final result = <int>[];
-    int i = 0;
-
-    while (i < bytes.length) {
-      // Check for OSC sequence: ESC ] ... BEL or ESC ] ... ST (ESC \)
-      if (i + 2 < bytes.length && bytes[i] == 0x1b && bytes[i + 1] == 0x5d) {
-        // Found ESC ]
-        int end = i + 2;
-        bool foundTerminator = false;
-
-        // Look for BEL (0x07) or ST (ESC \ = 0x1b 0x5c) terminator
-        while (end < bytes.length) {
-          if (bytes[end] == 0x07) {
-            // Found BEL terminator
-            foundTerminator = true;
-            break;
-          }
-          if (end + 1 < bytes.length &&
-              bytes[end] == 0x1b &&
-              bytes[end + 1] == 0x5c) {
-            // Found ST terminator
-            foundTerminator = true;
-            end++;
-            break;
-          }
-          end++;
-        }
-
-        if (foundTerminator && end < bytes.length) {
-          // Extract OSC content
-          final oscContent =
-              utf8.decode(bytes.sublist(i + 2, end), allowMalformed: true);
-
-          // Handle OSC sequence based on command number
-          _handleOscSequence(oscContent);
-
-          // Skip this OSC sequence
-          i = end + 1;
-          continue;
-        }
-      }
-
-      // Regular byte, keep it
-      result.add(bytes[i]);
-      i++;
-    }
-
-    return result;
-  }
-
   /// Handle a parsed OSC sequence
   void _handleOscSequence(String oscContent) {
     // Parse command number (everything before first semicolon)
@@ -647,50 +594,6 @@ class TerminalBinding extends NoctermBinding
     return _dispatchKeyToElement(rootElement!, event);
   }
 
-  /// Route a mouse event through the component tree
-  void _routeMouseEvent(MouseEvent event) {
-    if (rootElement == null) {
-      return;
-    }
-
-    // Handle wheel events for scrollable widgets
-    if (event.button == MouseButton.wheelUp ||
-        event.button == MouseButton.wheelDown) {
-      // Find the render object at the mouse position
-      final renderObject = _findRenderObjectInTree(rootElement!);
-      if (renderObject != null) {
-        _dispatchMouseWheelAtPosition(rootElement!, event,
-            Offset(event.x.toDouble(), event.y.toDouble()), Offset.zero);
-      }
-    }
-
-    // Perform hit test for all mouse events
-    final renderObject = _findRenderObjectInTree(rootElement!);
-    if (renderObject != null) {
-      final hitTestResult = MouseHitTestResult();
-      // Mouse coordinates are already 0-based (converted by MouseParser)
-      final position = Offset(event.x.toDouble(), event.y.toDouble());
-
-      // Perform hit test from the root render object
-      renderObject.hitTest(hitTestResult, position: position);
-
-      // Update mouse tracker with hit test results
-      _mouseTracker.updateAnnotations(hitTestResult, event);
-    }
-  }
-
-  /// Find the render object in the element tree
-  RenderObject? _findRenderObjectInTree(Element element) {
-    if (element is RenderObjectElement) {
-      return element.renderObject;
-    }
-    RenderObject? result;
-    element.visitChildren((child) {
-      result ??= _findRenderObjectInTree(child);
-    });
-    return result;
-  }
-
   /// Dispatch raw stdin bytes to [InputListenerElement]s in the tree.
   /// Returns true if any listener consumed the bytes.
   bool _dispatchRawInput(List<int> bytes) {
@@ -745,88 +648,6 @@ class TerminalBinding extends NoctermBinding
     // If no child handled it, and this element can handle keys, try it
     if (!handled && element is FocusableElement) {
       handled = element.handleKeyEvent(event);
-    }
-
-    return handled;
-  }
-
-  /// Dispatch a mouse wheel event to scrollable RenderObjects at a specific position
-  bool _dispatchMouseWheelAtPosition(Element element, MouseEvent event,
-      Offset mousePos, Offset currentOffset) {
-    // TODO: This is a hack to handle RenderTheater specially for Navigator
-    // Should be properly integrated into the render object hierarchy
-    if (element.renderObject is RenderTheater) {
-      final multiChildRenderObject = element as MultiChildRenderObjectElement;
-      if (multiChildRenderObject.children.isNotEmpty) {
-        final child = multiChildRenderObject.children.last;
-        return _dispatchMouseWheelAtPosition(
-            child, event, mousePos, currentOffset);
-      }
-    }
-
-    // Calculate this element's bounds if it has a render object
-    Rect? elementBounds;
-    RenderObject? renderObject;
-
-    if (element is RenderObjectElement) {
-      renderObject = element.renderObject;
-      final size = renderObject.size;
-
-      // Get the offset from parent data if available
-      Offset localOffset = currentOffset;
-      if (renderObject.parentData is BoxParentData) {
-        final boxParentData = renderObject.parentData as BoxParentData;
-        localOffset = currentOffset + boxParentData.offset;
-      }
-
-      elementBounds = Rect.fromLTWH(
-        localOffset.dx,
-        localOffset.dy,
-        size.width,
-        size.height,
-      );
-    }
-
-    // Check if mouse is within this element's bounds
-    bool isWithinBounds = elementBounds?.contains(mousePos) ?? true;
-
-    if (!isWithinBounds) {
-      return false; // Mouse is outside this element
-    }
-
-    // Try to dispatch to children first (depth-first, but only if within their bounds)
-    bool handled = false;
-
-    // Calculate offset for children
-    Offset childrenOffset = currentOffset;
-    if (element is RenderObjectElement && elementBounds != null) {
-      // Use the element's actual position for its children
-      childrenOffset = Offset(elementBounds.left, elementBounds.top);
-    }
-
-    // Visit children in reverse order to respect visual stacking
-    // (last child is visually on top in Stack-like containers)
-    final children = <Element>[];
-    element.visitChildren((child) {
-      children.add(child);
-    });
-
-    for (final child in children.reversed) {
-      if (!handled) {
-        handled = _dispatchMouseWheelAtPosition(
-            child, event, mousePos, childrenOffset);
-      }
-    }
-
-    // If no child handled it and this element's render object is scrollable, handle it here
-    if (!handled &&
-        renderObject != null &&
-        renderObject is ScrollableRenderObjectMixin) {
-      final scrollableRenderObject =
-          renderObject as ScrollableRenderObjectMixin;
-      // Check if the render object implements scrolling through duck typing
-      // This allows the RenderObject to handle scrolling without importing the mixin
-      handled = scrollableRenderObject.handleMouseWheel(event);
     }
 
     return handled;

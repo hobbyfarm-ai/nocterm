@@ -28,80 +28,70 @@ class MouseParser {
 
     // Parse the parameters between < and M/m
     final params = String.fromCharCodes(buffer.sublist(3, terminatorIndex));
-    final parts = params.split(';');
+    return fromSgrParams(params, pressed: buffer[terminatorIndex] == 0x4D);
+  }
 
+  /// Decode an SGR mouse event from its parameter string ("b;x;y") and
+  /// terminator ('M' = [pressed], 'm' = release).
+  static MouseEvent? fromSgrParams(String params, {required bool pressed}) {
+    final parts = params.split(';');
     if (parts.length != 3) return null;
 
-    try {
-      final buttonCode = int.parse(parts[0]);
-      final x = int.parse(parts[1]) - 1; // Convert to 0-based
-      final y = int.parse(parts[2]) - 1; // Convert to 0-based
-      bool pressed =
-          buffer[terminatorIndex] == 0x4D; // 'M' = press, 'm' = release
+    final buttonCode = int.tryParse(parts[0]);
+    final rawX = int.tryParse(parts[1]);
+    final rawY = int.tryParse(parts[2]);
+    if (buttonCode == null || rawX == null || rawY == null) return null;
 
-      // Decode button from SGR button code
-      MouseButton? button;
+    final x = rawX - 1; // Convert to 0-based
+    final y = rawY - 1;
 
-      // In SGR mode:
-      // Bits 0-1: button number (0=left, 1=middle, 2=right, 3=release/none)
-      // Bit 5 (32): motion/drag flag
-      // Bit 6 (64): shift for wheel (64=up, 65=down)
+    // Decode button from SGR button code
+    MouseButton? button;
 
-      // Check for wheel events first (64 and 65)
-      if (buttonCode == 64) {
-        button = MouseButton.wheelUp;
-      } else if (buttonCode == 65) {
-        button = MouseButton.wheelDown;
-      } else {
-        // Handle motion and button events
-        final baseButton = buttonCode & 0x3;
-        final isMotion = (buttonCode & 0x20) != 0; // Bit 5
+    // In SGR mode:
+    // Bits 0-1: button number (0=left, 1=middle, 2=right, 3=release/none)
+    // Bit 5 (32): motion/drag flag
+    // Bit 6 (64): shift for wheel (64=up, 65=down)
 
-        if (isMotion && baseButton == 3) {
-          // Mouse motion without button press - use left as placeholder and
-          // treat as not pressed to indicate hover/move.
+    // Check for wheel events first (64 and 65)
+    if (buttonCode == 64) {
+      button = MouseButton.wheelUp;
+    } else if (buttonCode == 65) {
+      button = MouseButton.wheelDown;
+    } else {
+      final baseButton = buttonCode & 0x3;
+      switch (baseButton) {
+        case 0:
           button = MouseButton.left;
-        } else {
-          // Regular button events
-          switch (baseButton) {
-            case 0:
-              button = MouseButton.left;
-              break;
-            case 1:
-              button = MouseButton.middle;
-              break;
-            case 2:
-              button = MouseButton.right;
-              break;
-            case 3:
-              // Release or no button - use left as placeholder
-              button = MouseButton.left;
-              break;
-          }
-        }
+          break;
+        case 1:
+          button = MouseButton.middle;
+          break;
+        case 2:
+          button = MouseButton.right;
+          break;
+        case 3:
+          // Release or motion with no button - use left as placeholder.
+          button = MouseButton.left;
+          break;
       }
-
-      if (button == null) {
-        return null;
-      }
-
-      final isMotionEvent = (buttonCode & 0x20) != 0; // Bit 5 indicates motion
-
-      // SGR motion with baseButton=3 indicates hover (no buttons pressed).
-      if (isMotionEvent && (buttonCode & 0x3) == 3) {
-        pressed = false;
-      }
-
-      return MouseEvent(
-        button: button,
-        x: x,
-        y: y,
-        pressed: pressed,
-        isMotion: isMotionEvent,
-      );
-    } catch (e) {
-      return null;
     }
+
+    if (button == null) return null;
+
+    final isMotionEvent = (buttonCode & 0x20) != 0; // Bit 5 indicates motion
+
+    // SGR motion with baseButton=3 indicates hover (no buttons pressed).
+    final effectivePressed =
+        isMotionEvent && (buttonCode & 0x3) == 3 ? false : pressed;
+
+    return MouseEvent(
+      button: button,
+      x: x,
+      y: y,
+      pressed: effectivePressed,
+      isMotion: isMotionEvent,
+    );
   }
 
   /// Parse X10 mouse sequence (ESC [ M button x y)
@@ -115,11 +105,15 @@ class MouseParser {
     }
 
     if (buffer.length != 6) return null;
+    return decodeX10(buffer[3], buffer[4], buffer[5]);
+  }
 
+  /// Decode an X10 mouse event from its three raw payload bytes.
+  static MouseEvent? decodeX10(int buttonRaw, int xRaw, int yRaw) {
     // X10 encoding: button and coordinates are offset by 32
-    final buttonByte = buffer[3] - 32;
-    final x = buffer[4] - 33; // -32 for encoding, -1 for 0-based
-    final y = buffer[5] - 33;
+    final buttonByte = buttonRaw - 32;
+    final x = xRaw - 33; // -32 for encoding, -1 for 0-based
+    final y = yRaw - 33;
 
     // Validate coordinates
     if (x < 0 || y < 0) return null;
