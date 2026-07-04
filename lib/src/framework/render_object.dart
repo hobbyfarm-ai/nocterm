@@ -212,6 +212,14 @@ class Offset {
   Offset operator -(Offset other) => Offset(dx - other.dx, dy - other.dy);
 
   @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Offset && other.dx == dx && other.dy == dy;
+
+  @override
+  int get hashCode => Object.hash(dx, dy);
+
+  @override
   String toString() => 'Offset($dx, $dy)';
 }
 

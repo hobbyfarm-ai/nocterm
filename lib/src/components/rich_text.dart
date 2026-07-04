@@ -52,22 +52,30 @@ class RichText extends SingleChildRenderObjectComponent {
 
   @override
   RenderObject createRenderObject(BuildContext context) {
+    final selectionStyle = SelectionStyle.maybeOf(context);
     return RenderParagraph(
       text: text,
       textAlign: textAlign,
       softWrap: softWrap,
       overflow: overflow,
       maxLines: maxLines,
-    );
+    )
+      ..registrar = SelectionRegistrarScope.maybeOf(context)
+      ..selection = selectionStyle?.selection
+      ..onSelection = selectionStyle?.onSelection;
   }
 
   @override
   void updateRenderObject(BuildContext context, RenderParagraph renderObject) {
+    final selectionStyle = SelectionStyle.maybeOf(context);
     renderObject
       ..text = text
       ..textAlign = textAlign
       ..softWrap = softWrap
       ..overflow = overflow
-      ..maxLines = maxLines;
+      ..maxLines = maxLines
+      ..registrar = SelectionRegistrarScope.maybeOf(context)
+      ..selection = selectionStyle?.selection
+      ..onSelection = selectionStyle?.onSelection;
   }
 }

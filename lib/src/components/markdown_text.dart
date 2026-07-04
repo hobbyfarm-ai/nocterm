@@ -3,7 +3,6 @@ import 'dart:math' as math;
 import 'package:characters/characters.dart';
 import 'package:markdown/markdown.dart' as md;
 import 'package:nocterm/nocterm.dart';
-import 'package:nocterm/src/utils/unicode_width.dart';
 
 /// A widget that displays markdown-formatted text.
 ///

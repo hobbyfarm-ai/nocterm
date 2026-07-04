@@ -24,6 +24,12 @@ class SocketBackend implements TerminalBackend {
   }
 
   @override
+  bool get isWriteInFlight => false;
+
+  @override
+  Stream<void>? get writeDrainedStream => null;
+
+  @override
   void writeRaw(String data) {
     throw UnsupportedError(
         'SocketBackend is only available on native platforms');

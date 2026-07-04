@@ -7,7 +7,6 @@ import 'package:nocterm/src/framework/terminal_canvas.dart';
 import '../rendering/mouse_hit_test.dart';
 import '../rendering/mouse_tracker.dart';
 import '../text/text_layout_engine.dart';
-import '../utils/unicode_width.dart';
 import '../text/selection_utils.dart' as selection_utils;
 import 'text_field/cursor_movement.dart';
 

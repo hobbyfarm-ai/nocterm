@@ -319,6 +319,12 @@ class _MockBackend implements TerminalBackend {
   void writeRawBytes(Uint8List bytes) {}
 
   @override
+  bool get isWriteInFlight => false;
+
+  @override
+  Stream<void>? get writeDrainedStream => null;
+
+  @override
   Size getSize() => _size;
 
   @override

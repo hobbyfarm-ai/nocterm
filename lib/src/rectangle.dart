@@ -40,5 +40,17 @@ class Rect {
   }
 
   @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Rect &&
+          other.left == left &&
+          other.top == top &&
+          other.width == width &&
+          other.height == height;
+
+  @override
+  int get hashCode => Object.hash(left, top, width, height);
+
+  @override
   String toString() => 'Rect.fromLTWH($left, $top, $width, $height)';
 }

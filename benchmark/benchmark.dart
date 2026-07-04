@@ -16,7 +16,6 @@ import 'dart:math' as math;
 import 'package:characters/characters.dart';
 import 'package:nocterm/nocterm.dart';
 import 'package:nocterm/src/framework/terminal_canvas.dart';
-import 'package:nocterm/src/utils/unicode_width.dart';
 
 // ---------------------------------------------------------------------------
 // Benchmark infrastructure

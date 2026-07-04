@@ -7,7 +7,8 @@ import '../text/text_layout_engine.dart';
 export '../text/text_layout_engine.dart' show TextOverflow, TextAlign;
 
 /// Render object for displaying text
-class RenderText extends RenderObject with Selectable {
+class RenderText extends RenderObject
+    with Selectable, SelectionRegistrant, TextSelectable {
   RenderText({
     required String text,
     TextStyle? style,
@@ -106,6 +107,8 @@ class RenderText extends RenderObject with Selectable {
       _layoutResult!.actualWidth.toDouble(),
       _layoutResult!.actualHeight.toDouble(),
     ));
+
+    didLayoutSelectableText();
   }
 
   @override

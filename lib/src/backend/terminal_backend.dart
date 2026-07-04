@@ -27,6 +27,16 @@ abstract class TerminalBackend {
     writeRaw(utf8.decode(bytes, allowMalformed: true));
   }
 
+  /// True while previously submitted bytes are still draining to the
+  /// output. Frame producers should defer rendering until
+  /// [writeDrainedStream] emits rather than stacking payloads behind a
+  /// stalled reader. Always false for backends that write synchronously.
+  bool get isWriteInFlight => false;
+
+  /// Emits each time the backend finishes writing all submitted bytes.
+  /// Returns null when writes complete synchronously (nothing to wait for).
+  Stream<void>? get writeDrainedStream => null;
+
   /// Get the current terminal size.
   Size getSize();
 

@@ -25,6 +25,14 @@ mixin MouseRouter on NoctermBinding {
           Offset(event.x.toDouble(), event.y.toDouble()), Offset.zero);
     }
 
+    // A captured drag routes every event to the captured annotation and
+    // ignores hit-test results, so skip the full-tree hit test — it's the
+    // dominant per-event cost when the terminal floods motion reports.
+    if (mouseTracker.hasActiveCapture) {
+      mouseTracker.updateAnnotations(MouseHitTestResult(), event);
+      return;
+    }
+
     // Perform hit test for all mouse events
     final renderObject = findRenderObjectInTree(root);
     if (renderObject != null) {

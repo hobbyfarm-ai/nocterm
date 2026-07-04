@@ -4,8 +4,6 @@ import 'package:characters/characters.dart';
 import 'package:nocterm/nocterm.dart';
 import 'package:nocterm/src/framework/terminal_canvas.dart';
 
-import '../utils/unicode_width.dart';
-
 /// Utilities for text selection hit testing and painting.
 ///
 /// Computes the character offset for the start of each line in [text].
@@ -28,15 +26,20 @@ List<int> lineStartOffsets(String text, List<String> lines) {
 }
 
 /// Maps a local position (x, y) to a character index within [text].
+///
+/// Pass [lineStarts] (from [lineStartOffsets]) when the caller caches it;
+/// omitted, it is computed on the fly.
 int getCharacterIndexAtLocalPosition({
   required Offset localPos,
   required String text,
   required List<String> lines,
+  List<int>? lineStarts,
 }) {
   if (lines.isEmpty) return 0;
 
   final lineIndex = localPos.dy.toInt().clamp(0, lines.length - 1);
-  final lineStartOffset = lineStartOffsets(text, lines)[lineIndex];
+  final lineStartOffset =
+      (lineStarts ?? lineStartOffsets(text, lines))[lineIndex];
   final line = lines[lineIndex];
   final targetX = localPos.dx;
 
@@ -54,7 +57,94 @@ int getCharacterIndexAtLocalPosition({
   return (lineStartOffset + charIndex).clamp(0, text.length);
 }
 
+/// Maps a character [offset] to its local cell position (column, line).
+///
+/// Pass [lineStarts] (from [lineStartOffsets]) when the caller caches it;
+/// omitted, it is computed on the fly.
+Offset positionForOffset({
+  required int offset,
+  required String text,
+  required List<String> lines,
+  List<int>? lineStarts,
+}) {
+  if (lines.isEmpty) return Offset.zero;
+  final starts = lineStarts ?? lineStartOffsets(text, lines);
+  int line = lines.length - 1;
+  for (int i = 0; i < lines.length - 1; i++) {
+    if (offset < starts[i + 1]) {
+      line = i;
+      break;
+    }
+  }
+  final local = (offset - starts[line]).clamp(0, lines[line].length);
+  final column = UnicodeWidth.stringWidth(lines[line].substring(0, local));
+  return Offset(column.toDouble(), line.toDouble());
+}
+
+/// Computes one local cell rect per line covered by the character range
+/// [start]..[end].
+///
+/// Pass [lineStarts] (from [lineStartOffsets]) when the caller caches it;
+/// omitted, it is computed on the fly.
+List<Rect> selectionRectsForRange({
+  required String text,
+  required List<String> lines,
+  required int start,
+  required int end,
+  List<int>? lineStarts,
+}) {
+  if (lines.isEmpty || start >= end) return const [];
+  final starts = lineStarts ?? lineStartOffsets(text, lines);
+  final rects = <Rect>[];
+  for (int i = 0; i < lines.length; i++) {
+    final lineStart = starts[i];
+    final lineEnd = lineStart + lines[i].length;
+    final selStart = math.max(start, lineStart);
+    final selEnd = math.min(end, lineEnd);
+    if (selStart >= selEnd) continue;
+    final left =
+        UnicodeWidth.stringWidth(lines[i].substring(0, selStart - lineStart));
+    final width = UnicodeWidth.stringWidth(
+        lines[i].substring(selStart - lineStart, selEnd - lineStart));
+    if (width == 0) continue;
+    rects
+        .add(Rect.fromLTWH(left.toDouble(), i.toDouble(), width.toDouble(), 1));
+  }
+  return rects;
+}
+
+final _wordChar = RegExp(r'[\p{L}\p{N}_]', unicode: true);
+final _whitespace = RegExp(r'\s');
+
+/// The character range of the word (or whitespace/symbol run) at [offset].
+({int start, int end}) wordRangeAt(
+    {required String text, required int offset}) {
+  if (text.isEmpty) return (start: 0, end: 0);
+  final anchor = offset.clamp(0, text.length - 1);
+
+  bool sameCategory(String a, String b) {
+    if (_wordChar.hasMatch(a)) return _wordChar.hasMatch(b);
+    if (_whitespace.hasMatch(a)) return _whitespace.hasMatch(b);
+    return !_wordChar.hasMatch(b) && !_whitespace.hasMatch(b);
+  }
+
+  final anchorChar = text[anchor];
+  var start = anchor;
+  while (start > 0 && sameCategory(anchorChar, text[start - 1])) {
+    start--;
+  }
+  var end = anchor + 1;
+  while (end < text.length && sameCategory(anchorChar, text[end])) {
+    end++;
+  }
+  return (start: start, end: end);
+}
+
 /// Paints a single line of text with optional selection highlighting.
+///
+/// Pass [lineStarts] (from [lineStartOffsets]) when the caller caches it —
+/// this runs once per painted line, so recomputing offsets here is
+/// quadratic in the line count. Omitted, it is computed on the fly.
 void paintTextWithSelection({
   required TerminalCanvas canvas,
   required Offset offset,
@@ -67,6 +157,7 @@ void paintTextWithSelection({
   required int? selectionEnd,
   required Color selection,
   required Color onSelection,
+  List<int>? lineStarts,
 }) {
   if (selectionStart == null ||
       selectionEnd == null ||
@@ -77,7 +168,7 @@ void paintTextWithSelection({
 
   final lineStartOffset =
       (lines.isNotEmpty && lineIndex > 0 && lineIndex < lines.length)
-          ? lineStartOffsets(text, lines)[lineIndex]
+          ? (lineStarts ?? lineStartOffsets(text, lines))[lineIndex]
           : 0;
   final lineEndOffset = lineStartOffset + line.length;
 

@@ -58,6 +58,12 @@ class WebBackend implements TerminalBackend {
   }
 
   @override
+  bool get isWriteInFlight => false;
+
+  @override
+  Stream<void>? get writeDrainedStream => null;
+
+  @override
   void writeRaw(String data) {
     throw UnsupportedError('WebBackend is only available on web platforms');
   }

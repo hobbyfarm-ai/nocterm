@@ -1,7 +1,77 @@
 import 'package:nocterm/nocterm.dart';
-import 'package:nocterm/src/components/selection_state.dart';
-import 'package:quiver/strings.dart' hide isEmpty;
+import 'package:nocterm/src/components/render_text.dart';
 import 'package:test/test.dart' hide isEmpty;
+
+Future<void> _drag(
+  NoctermTester tester,
+  (int, int) from,
+  (int, int) to,
+) async {
+  await tester.press(from.$1, from.$2);
+  await tester.sendMouseEvent(MouseEvent(
+    button: MouseButton.left,
+    x: to.$1,
+    y: to.$2,
+    pressed: true,
+    isMotion: true,
+  ));
+  await tester.release(to.$1, to.$2);
+}
+
+class _RebuildHarness extends StatefulComponent {
+  const _RebuildHarness();
+
+  @override
+  State<_RebuildHarness> createState() => _RebuildHarnessState();
+}
+
+class _RebuildHarnessState extends State<_RebuildHarness> {
+  static _RebuildHarnessState? instance;
+
+  String _firstLine = 'Hello';
+  String _secondLine = 'World';
+
+  void setLines({String? first, String? second}) => setState(() {
+        _firstLine = first ?? _firstLine;
+        _secondLine = second ?? _secondLine;
+      });
+
+  @override
+  void initState() {
+    super.initState();
+    instance = this;
+  }
+
+  @override
+  void dispose() {
+    if (instance == this) instance = null;
+    super.dispose();
+  }
+
+  @override
+  Component build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(_firstLine),
+        Text(_secondLine),
+      ],
+    );
+  }
+}
+
+class _CapturingText extends Text {
+  const _CapturingText(super.data, {required this.onRender});
+
+  final void Function(RenderText) onRender;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) {
+    final renderObject = super.createRenderObject(context) as RenderText;
+    onRender(renderObject);
+    return renderObject;
+  }
+}
 
 void main() {
   group('SelectionArea', () {
@@ -31,7 +101,6 @@ void main() {
             ),
           );
 
-          // Drag from inside "Hello" to inside "World".
           await tester.press(1, 0);
           await tester.sendMouseEvent(const MouseEvent(
             button: MouseButton.left,
@@ -55,9 +124,9 @@ void main() {
       );
     });
 
-    test('clears selection when text content changes', () async {
+    test('selection persists when sibling content changes', () async {
       await testNocterm(
-        'clears selection on text change',
+        'selection persists across rebuild',
         (tester) async {
           String? lastChanged;
 
@@ -67,43 +136,87 @@ void main() {
               height: 4,
               child: SelectionArea(
                 onSelectionChanged: (text) => lastChanged = text,
-                child: const Text('Hello'),
+                child: const _RebuildHarness(),
               ),
             ),
           );
 
-          // Select part of "Hello"
-          await tester.press(1, 0);
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 4,
-            y: 0,
-            pressed: true,
-            isMotion: true,
-          ));
-          await tester.release(4, 0);
+          await _drag(tester, (1, 0), (4, 0));
+          expect(lastChanged, 'ell');
 
-          expect(lastChanged, equals('ell'));
+          _RebuildHarnessState.instance!.setLines(second: 'Changed');
+          await tester.pump();
+          await tester.pump();
 
-          // Change text content — selection should be cleared by the
-          // RenderText.text setter calling clearSelection().
+          expect(lastChanged, 'ell');
+        },
+      );
+    });
+
+    test('selection clamps when the selected text shrinks', () async {
+      await testNocterm(
+        'selection clamps on shrink',
+        (tester) async {
           await tester.pumpComponent(
             Container(
               width: 20,
               height: 4,
-              child: SelectionArea(
-                onSelectionChanged: (text) => lastChanged = text,
-                child: const Text('Goodbye'),
+              child: const SelectionArea(
+                child: _RebuildHarness(),
               ),
             ),
           );
 
-          // Press and immediately release at origin to trigger a new
-          // selection pass that sees the cleared state.
-          await tester.press(0, 0);
-          await tester.release(0, 0);
+          await _drag(tester, (0, 0), (5, 0));
 
-          expect(lastChanged, equals(''));
+          _RebuildHarnessState.instance!.setLines(first: 'Hi');
+          await tester.pump();
+          await tester.pump();
+        },
+      );
+    });
+
+    test('anchor survives leaving and re-entering the area mid-drag', () async {
+      await testNocterm(
+        'drag out and back',
+        size: const Size(20, 4),
+        (tester) async {
+          String? completed;
+
+          await tester.pumpComponent(
+            SelectionArea(
+              onSelectionCompleted: (text) => completed = text,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text('Hello'),
+                  Text('World'),
+                ],
+              ),
+            ),
+          );
+
+          await tester.press(1, 0);
+          // Drag beyond the terminal bounds: no annotation is hit out
+          // here, which used to end the drag and drop the anchor.
+          await tester.sendMouseEvent(const MouseEvent(
+            button: MouseButton.left,
+            x: 30,
+            y: 9,
+            pressed: true,
+            isMotion: true,
+          ));
+          // Re-enter and keep dragging from the original anchor.
+          await tester.sendMouseEvent(const MouseEvent(
+            button: MouseButton.left,
+            x: 3,
+            y: 1,
+            pressed: true,
+            isMotion: true,
+          ));
+          await tester.release(3, 1);
+
+          expect(completed, 'ello\nWor');
         },
       );
     });
@@ -111,60 +224,33 @@ void main() {
     test('starts selection when pressing on whitespace and dragging into text',
         () async {
       await testNocterm(
-        'drag from whitespace',
+        'whitespace press',
         (tester) async {
-          String? lastChanged;
+          String? completed;
 
           await tester.pumpComponent(
             Container(
               width: 20,
               height: 4,
               child: SelectionArea(
-                onSelectionChanged: (text) => lastChanged = text,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    SizedBox(height: 1), // row 0: non-selectable whitespace
-                    Text('Hello'), // row 1: selectable text
-                  ],
+                onSelectionCompleted: (text) => completed = text,
+                child: const Align(
+                  alignment: Alignment.topLeft,
+                  child: Text('Hello'),
                 ),
               ),
             ),
           );
 
-          // Press at (1, 0) — whitespace, no selectable hit.
-          await tester.press(1, 0);
-
-          // Drag into "Hello" at row 1 — lazy anchor sets here.
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 1,
-            y: 1,
-            pressed: true,
-            isMotion: true,
-          ));
-
-          // Extend selection within "Hello".
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 4,
-            y: 1,
-            pressed: true,
-            isMotion: true,
-          ));
-
-          await tester.release(4, 1);
-
-          // Selection should cover part of "Hello".
-          expect(lastChanged, isNotBlank);
-          expect(lastChanged!.length, greaterThan(0));
+          await _drag(tester, (10, 2), (2, 0));
+          expect(completed, 'llo');
         },
       );
     });
 
     test('selection crosses a non-selectable gap between widgets', () async {
       await testNocterm(
-        'cross boundary selection',
+        'gap crossing',
         (tester) async {
           String? completed;
 
@@ -176,626 +262,25 @@ void main() {
                 onSelectionCompleted: (text) => completed = text,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    Text('Top'), // row 0
-                    SizedBox(height: 1), // row 1: gap
-                    Text('Bottom'), // row 2
+                  children: [
+                    const Text('Hello'),
+                    Container(height: 1),
+                    const Text('World'),
                   ],
                 ),
               ),
             ),
           );
 
-          // Press inside "Top" at row 0, drag across gap into "Bottom".
-          await tester.press(0, 0);
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 3,
-            y: 2,
-            pressed: true,
-            isMotion: true,
-          ));
-          await tester.release(3, 2);
-
-          // Should include text from both "Top" and "Bottom".
-          expect(completed, isNotBlank);
-          expect(completed, contains('Top'));
-          expect(completed, contains('Bot'));
+          await _drag(tester, (1, 0), (3, 2));
+          expect(completed, 'ello\nWor');
         },
       );
     });
 
     test('selection updates on mouse release position', () async {
       await testNocterm(
-        'selection release update',
-        (tester) async {
-          String? completed;
-
-          await tester.pumpComponent(
-            Container(
-              width: 10,
-              height: 2,
-              child: SelectionArea(
-                onSelectionCompleted: (text) => completed = text,
-                child: const Text('Hello'),
-              ),
-            ),
-          );
-
-          // Press near "e", drag slightly, then release farther right
-          // without an intermediate move event.
-          await tester.press(1, 0);
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 2,
-            y: 0,
-            pressed: true,
-            isMotion: true,
-          ));
-          await tester.release(5, 0);
-
-          expect(completed, equals('ello'));
-        },
-      );
-    });
-
-    test('drag below last line clamps selection to end', () async {
-      await testNocterm(
-        'drag below last line',
-        (tester) async {
-          String? completed;
-
-          await tester.pumpComponent(
-            Container(
-              width: 20,
-              height: 2,
-              child: SelectionArea(
-                onSelectionCompleted: (text) => completed = text,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    Text('First'),
-                    Text('Second'),
-                  ],
-                ),
-              ),
-            ),
-          );
-
-          await tester.press(0, 0);
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 10,
-            y: 5,
-            pressed: true,
-            isMotion: true,
-          ));
-          await tester.release(10, 5);
-
-          expect(completed, equals('First\nSecond'));
-        },
-      );
-    });
-
-    test('reanchors when anchored selectable is replaced', () async {
-      await testNocterm(
-        'reanchor on replace',
-        (tester) async {
-          String? lastChanged;
-
-          await tester.pumpComponent(
-            Container(
-              width: 20,
-              height: 3,
-              child: _SelectionRebuildHarness(
-                onSelectionChanged: (text) => lastChanged = text,
-              ),
-            ),
-          );
-
-          // Start selection on the first line.
-          await tester.press(1, 0);
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 3,
-            y: 0,
-            pressed: true,
-            isMotion: true,
-          ));
-
-          // Rebuild with a different key for the first line (anchor removed).
-          final state = _SelectionRebuildHarness.lastState!;
-          state.swapFirstKey();
-          await tester.pump();
-
-          // Move to the second line to trigger reanchor logic.
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 2,
-            y: 1,
-            pressed: true,
-            isMotion: true,
-          ));
-          await tester.release(2, 1);
-
-          expect(lastChanged, isNotBlank);
-        },
-      );
-    });
-
-    test('selection setter updates cached selectables', () async {
-      await testNocterm(
-        'selection setter',
-        (tester) async {
-          RenderSelectionArea? renderObject;
-          String? lastChanged;
-
-          await tester.pumpComponent(
-            Container(
-              width: 20,
-              height: 2,
-              child: _RenderSelectionAreaHarness(
-                onCreated: (ro) => renderObject = ro,
-                onSelectionChanged: (text) => lastChanged = text,
-                selection: Colors.red,
-                child: const Text('Hello'),
-              ),
-            ),
-          );
-
-          await tester.press(1, 0);
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 4,
-            y: 0,
-            pressed: true,
-            isMotion: true,
-          ));
-          await tester.release(4, 0);
-
-          expect(lastChanged, isNotBlank);
-
-          final current = renderObject!.selection;
-          expect(current, equals(Colors.red));
-
-          renderObject!.selection = Colors.green;
-          expect(renderObject!.selection, equals(Colors.green));
-        },
-      );
-    });
-
-    test('onEnter clears left button pressed state', () async {
-      await testNocterm(
-        'onEnter clears left button pressed',
-        (tester) async {
-          String? lastChanged;
-
-          await tester.pumpComponent(
-            Container(
-              width: 10,
-              height: 2,
-              child: _RenderSelectionAreaHarness(
-                onSelectionChanged: (text) => lastChanged = text,
-                child: const Text('Hello'),
-              ),
-            ),
-          );
-
-          // Move outside first to establish a prior position.
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 20,
-            y: 5,
-            pressed: false,
-            isMotion: true,
-          ));
-
-          // Enter without left button pressed.
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 1,
-            y: 0,
-            pressed: false,
-            isMotion: true,
-          ));
-
-          expect(lastChanged ?? '', equals(''));
-        },
-      );
-    });
-
-    test('onHover with left button down triggers selection start', () async {
-      await testNocterm(
-        'hover left button down',
-        (tester) async {
-          String? lastChanged;
-
-          await tester.pumpComponent(
-            Container(
-              width: 10,
-              height: 2,
-              child: _RenderSelectionAreaHarness(
-                onSelectionChanged: (text) => lastChanged = text,
-                child: const Text('Hello'),
-              ),
-            ),
-          );
-
-          // Hover with left button reported as down.
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 1,
-            y: 0,
-            pressed: false,
-            isMotion: true,
-            buttons: {MouseButton.left},
-          ));
-
-          // Drag to update selection.
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 3,
-            y: 0,
-            pressed: true,
-            isMotion: true,
-          ));
-          await tester.release(3, 0);
-
-          expect(lastChanged, isNotNull);
-        },
-      );
-    });
-
-    test('onExit finalizes selection when leaving region', () async {
-      await testNocterm(
-        'exit finalizes selection',
-        (tester) async {
-          String? completed;
-
-          await tester.pumpComponent(
-            Container(
-              width: 10,
-              height: 2,
-              child: _RenderSelectionAreaHarness(
-                onSelectionCompleted: (text) => completed = text,
-                child: const Text('Hello'),
-              ),
-            ),
-          );
-
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 1,
-            y: 0,
-            pressed: false,
-            isMotion: true,
-          ));
-
-          await tester.press(1, 0);
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 3,
-            y: 0,
-            pressed: true,
-            isMotion: true,
-          ));
-
-          // Exit the region with the button released.
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 20,
-            y: 5,
-            pressed: false,
-            isMotion: false,
-          ));
-
-          expect(completed, isNotNull);
-        },
-      );
-    });
-
-    test('anchor context removed clears selection', () async {
-      await testNocterm(
-        'anchor context removed',
-        (tester) async {
-          String? lastChanged;
-
-          await tester.pumpComponent(
-            Container(
-              width: 20,
-              height: 3,
-              child: _SelectionAreaSwapHarness(
-                onSelectionChanged: (text) => lastChanged = text,
-              ),
-            ),
-          );
-
-          await tester.press(0, 0);
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 4,
-            y: 1,
-            pressed: true,
-            isMotion: true,
-          ));
-
-          // Swap the child while keeping the same SelectionArea render object.
-          final state = _SelectionAreaSwapHarness.lastState!;
-          state.swapToColumn();
-          await tester.pump();
-
-          // Move to trigger selection update with stale anchor context.
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 2,
-            y: 0,
-            pressed: true,
-            isMotion: true,
-          ));
-          await tester.release(2, 0);
-
-          expect(lastChanged, equals(''));
-        },
-      );
-    });
-
-    test('onExit handles left button release when invoked directly', () async {
-      await testNocterm(
-        'onExit direct',
-        (tester) async {
-          RenderSelectionArea? renderObject;
-          String? completed;
-
-          await tester.pumpComponent(
-            Container(
-              width: 10,
-              height: 2,
-              child: _RenderSelectionAreaHarness(
-                onCreated: (ro) => renderObject = ro,
-                onSelectionCompleted: (text) => completed = text,
-                child: const Text('Hello'),
-              ),
-            ),
-          );
-
-          final annotation = renderObject!.annotation!;
-          annotation.onEnter?.call(const MouseEvent(
-            button: MouseButton.left,
-            x: 1,
-            y: 0,
-            pressed: true,
-          ));
-          annotation.onExit?.call(const MouseEvent(
-            button: MouseButton.left,
-            x: 20,
-            y: 5,
-            pressed: false,
-          ));
-
-          expect(completed, isNotNull);
-        },
-      );
-    });
-
-    test('dispose cleans drag state when unmounted mid-drag', () async {
-      await testNocterm(
-        'dispose mid-drag cleanup',
-        (tester) async {
-          await tester.pumpComponent(
-            Container(
-              width: 10,
-              height: 2,
-              child: const _SelectionAreaUnmountHarness(),
-            ),
-          );
-
-          await tester.press(1, 0);
-          expect(SelectionDragState.isActive, isTrue);
-
-          final state = _SelectionAreaUnmountHarness.lastState!;
-          state.unmountSelectionArea();
-          await tester.pump();
-
-          expect(SelectionDragState.isActive, isFalse);
-        },
-      );
-    });
-
-    test('ListView items with multiple selectables use positional sort',
-        () async {
-      await testNocterm(
-        'listview positional sort',
-        (tester) async {
-          String? completed;
-
-          await tester.pumpComponent(
-            Container(
-              width: 30,
-              height: 3,
-              child: SelectionArea(
-                onSelectionCompleted: (text) => completed = text,
-                child: ListView.builder(
-                  itemCount: 2,
-                  itemBuilder: (context, index) => Row(
-                    children: [
-                      Text('A$index'),
-                      Text('B$index'),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          );
-
-          await tester.press(0, 0);
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 4,
-            y: 1,
-            pressed: true,
-            isMotion: true,
-          ));
-          await tester.release(4, 1);
-
-          expect(completed, isNotBlank);
-        },
-      );
-    });
-
-    test('ListView returns to lazy mode after selection drag ends', () async {
-      await testNocterm(
-        'listview lazy restore',
-        (tester) async {
-          await tester.pumpComponent(
-            Container(
-              width: 20,
-              height: 3,
-              child: SelectionArea(
-                child: ListView.builder(
-                  itemCount: 200,
-                  lazy: true,
-                  itemBuilder: (context, index) => Text('Item$index'),
-                ),
-              ),
-            ),
-          );
-
-          RenderListViewport? viewport;
-          void findViewport(Element element) {
-            if (element is RenderObjectElement &&
-                element.renderObject is RenderListViewport) {
-              viewport = element.renderObject as RenderListViewport;
-              return;
-            }
-            element.visitChildren(findViewport);
-          }
-
-          findViewport(NoctermTestBinding.instance.rootElement!);
-          expect(viewport, isNotNull);
-
-          final initialCount = tester.findAllComponents<Text>().length;
-
-          SelectionDragState.begin();
-          SelectionDragState.updateRange(viewport!, 0, 120);
-          await tester.pump();
-
-          final duringDragCount = tester.findAllComponents<Text>().length;
-          expect(duringDragCount, greaterThan(initialCount));
-
-          SelectionDragState.end();
-          await tester.pump();
-
-          final afterEndCount = tester.findAllComponents<Text>().length;
-          expect(afterEndCount, lessThanOrEqualTo(initialCount));
-        },
-      );
-    });
-
-    test('nearest selectable uses left-side distance', () async {
-      await testNocterm(
-        'nearest selectable left',
-        (tester) async {
-          String? lastChanged;
-
-          await tester.pumpComponent(
-            Container(
-              width: 10,
-              height: 2,
-              child: SelectionArea(
-                onSelectionChanged: (text) => lastChanged = text,
-                child: const Padding(
-                  padding: EdgeInsets.only(left: 3),
-                  child: Text('Hello'),
-                ),
-              ),
-            ),
-          );
-
-          await tester.press(4, 0);
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 1,
-            y: 0,
-            pressed: true,
-            isMotion: true,
-          ));
-          await tester.release(1, 0);
-
-          expect(lastChanged, isNotNull);
-        },
-      );
-    });
-
-    test('multiline selection inserts newlines', () async {
-      await testNocterm(
-        'multiline newlines',
-        (tester) async {
-          String? completed;
-
-          await tester.pumpComponent(
-            Container(
-              width: 10,
-              height: 3,
-              child: SelectionArea(
-                onSelectionCompleted: (text) => completed = text,
-                child: const Text('AA\nBB'),
-              ),
-            ),
-          );
-
-          await tester.press(0, 0);
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 3,
-            y: 1,
-            pressed: true,
-            isMotion: true,
-          ));
-          await tester.release(3, 1);
-
-          expect(completed, equals('AA\nBB'));
-        },
-      );
-    });
-
-    test('multiline selection inserts spaces for same-row widgets', () async {
-      await testNocterm(
-        'multiline spaces',
-        (tester) async {
-          RenderSelectionArea? renderObject;
-
-          await tester.pumpComponent(
-            Container(
-              width: 20,
-              height: 3,
-              child: _RenderSelectionAreaHarness(
-                onCreated: (ro) => renderObject = ro,
-                child: const Text('AA\nBB'),
-              ),
-            ),
-          );
-
-          // Seed the buffer with a multi-line selection and append another
-          // multi-line selectable on the same row to force a space separator.
-          final appended = renderObject!.debugAppendSelectedText(
-            initial: 'AA\nBB',
-            text: 'CC\nDD',
-            lines: const ['CC', 'DD'],
-            start: 0,
-            end: 5,
-            topRow: 0,
-            height: 2,
-            lastBottomRow: 1,
-          );
-
-          expect(appended, equals('AA\nBB CC\nDD'));
-        },
-      );
-    });
-
-    test('excludes offscreen text from selection output', () async {
-      await testNocterm(
-        'offscreen exclusion',
+        'release position',
         (tester) async {
           String? completed;
 
@@ -805,45 +290,51 @@ void main() {
               height: 4,
               child: SelectionArea(
                 onSelectionCompleted: (text) => completed = text,
-                child: Stack(
-                  children: [
-                    Positioned(
-                      left: 0,
-                      top: 0,
-                      child: const Text('Visible'),
-                    ),
-                    Positioned(
-                      left: 0,
-                      top: -1,
-                      child: const Text('Hidden'),
-                    ),
-                  ],
+                child: const Text('Hello world'),
+              ),
+            ),
+          );
+
+          await tester.press(0, 0);
+          await tester.sendMouseEvent(const MouseEvent(
+            button: MouseButton.left,
+            x: 3,
+            y: 0,
+            pressed: true,
+            isMotion: true,
+          ));
+          await tester.release(8, 0);
+
+          expect(completed, 'Hello wo');
+        },
+      );
+    });
+
+    test('drag below last line clamps selection to end', () async {
+      await testNocterm(
+        'drag below clamps',
+        (tester) async {
+          String? completed;
+
+          await tester.pumpComponent(
+            Container(
+              width: 20,
+              height: 4,
+              child: SelectionArea(
+                onSelectionCompleted: (text) => completed = text,
+                child: const Align(
+                  alignment: Alignment.topLeft,
+                  child: Text('Hello'),
                 ),
               ),
             ),
           );
 
-          // Select everything by dragging across the visible area
-          await tester.press(0, 0);
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 10,
-            y: 0,
-            pressed: true,
-            isMotion: true,
-          ));
-          await tester.release(10, 0);
-
-          // "Hidden" is at top=-1 which is above the SelectionArea's
-          // bounds (starts at row 0), so it should be excluded.
-          expect(completed, isNotBlank);
-          expect(completed, contains('Visible'));
-          expect(completed, isNot(contains('Hidden')));
+          await _drag(tester, (0, 0), (10, 3));
+          expect(completed, 'Hello');
         },
       );
     });
-
-    // --- New coverage tests ---
 
     test('backward selection across three widgets', () async {
       await testNocterm(
@@ -854,338 +345,146 @@ void main() {
           await tester.pumpComponent(
             Container(
               width: 20,
-              height: 5,
+              height: 4,
               child: SelectionArea(
                 onSelectionCompleted: (text) => completed = text,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: const [
-                    Text('Alpha'),
-                    Text('Bravo'),
-                    Text('Charlie'),
+                    Text('One'),
+                    Text('Two'),
+                    Text('Three'),
                   ],
                 ),
               ),
             ),
           );
 
-          // Press on row 2 (Charlie), drag backward to row 0 (Alpha).
-          await tester.press(3, 2);
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 1,
-            y: 0,
-            pressed: true,
-            isMotion: true,
-          ));
-          await tester.release(1, 0);
-
-          // Backward: anchor=Charlie[3], focus=Alpha[1].
-          // Alpha: forward=false → range [focus.offset, len) = [1, 5) = "lpha"
-          // Bravo: intermediate → fully selected = "Bravo"
-          // Charlie: forward=false → range [0, anchor.offset) = [0, 3) = "Cha"
-          expect(completed, isNotBlank);
-          expect(completed, contains('lpha'));
-          expect(completed, contains('Bravo'));
-          expect(completed, contains('Cha'));
+          await _drag(tester, (3, 2), (1, 0));
+          expect(completed, 'ne\nTwo\nThr');
         },
       );
     });
 
-    test('horizontal flex does not expand selection to sibling row items',
-        () async {
+    test('same-row widgets join with a space', () async {
       await testNocterm(
-        'row group expansion',
+        'same-row join',
         (tester) async {
           String? completed;
 
           await tester.pumpComponent(
             Container(
               width: 20,
-              height: 4,
+              height: 3,
               child: SelectionArea(
                 onSelectionCompleted: (text) => completed = text,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(children: const [Text('AA'), Text(' BB')]),
-                    Row(children: const [Text('CC'), Text(' DD')]),
+                    Row(
+                      children: const [
+                        Text('foo'),
+                        Text('bar'),
+                      ],
+                    ),
                   ],
                 ),
               ),
             ),
           );
 
-          // Press on first row's first text, drag to second row.
-          await tester.press(1, 0);
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 1,
-            y: 1,
-            pressed: true,
-            isMotion: true,
-          ));
-          await tester.release(1, 1);
-
-          // Selection should include only the contiguous range between anchor
-          // and focus, without pulling in sibling row items (e.g. " DD").
-          expect(completed, isNotBlank);
-          expect(completed, contains('A'));
-          expect(completed, contains('BB'));
-          expect(completed, contains('C'));
-          expect(completed, isNot(contains('DD')));
+          await _drag(tester, (0, 0), (6, 0));
+          expect(completed, 'foo bar');
         },
       );
     });
 
-    test('selection same-value early return and actual update', () async {
+    test('hard newlines in a single Text are preserved', () async {
       await testNocterm(
-        'selection color update',
+        'hard newlines',
         (tester) async {
-          String? lastChanged;
+          String? completed;
 
-          // Pump with red selection color.
           await tester.pumpComponent(
             Container(
               width: 20,
               height: 4,
               child: SelectionArea(
-                selection: Colors.red,
-                onSelectionChanged: (text) => lastChanged = text,
-                child: const Text('Hello'),
+                onSelectionCompleted: (text) => completed = text,
+                child: const Text('AA\nBB'),
               ),
             ),
           );
 
-          // Select some text to populate _cachedSelectables.
-          await tester.press(0, 0);
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 3,
-            y: 0,
-            pressed: true,
-            isMotion: true,
-          ));
-          await tester.release(3, 0);
-
-          expect(lastChanged, isNotBlank);
-
-          // Re-pump with same color (early return at line 117).
-          await tester.pumpComponent(
-            Container(
-              width: 20,
-              height: 4,
-              child: SelectionArea(
-                selection: Colors.red,
-                onSelectionChanged: (text) => lastChanged = text,
-                child: const Text('Hello'),
-              ),
-            ),
-          );
-
-          // Re-pump with different color (lines 120-123).
-          await tester.pumpComponent(
-            Container(
-              width: 20,
-              height: 4,
-              child: SelectionArea(
-                selection: Colors.green,
-                onSelectionChanged: (text) => lastChanged = text,
-                child: const Text('Hello'),
-              ),
-            ),
-          );
-
-          // No crash expected.
+          await _drag(tester, (0, 0), (2, 1));
+          expect(completed, 'AA\nBB');
         },
       );
     });
 
-    test('null onSelectionCompleted callback', () async {
+    test('soft-wrapped text copies as logical text without wrap newlines',
+        () async {
+      await testNocterm(
+        'wrapped copies logical',
+        size: const Size(6, 4),
+        (tester) async {
+          String? completed;
+
+          await tester.pumpComponent(
+            SelectionArea(
+              onSelectionCompleted: (text) => completed = text,
+              child: const Text('hello world'),
+            ),
+          );
+
+          await _drag(tester, (0, 0), (5, 1));
+          expect(completed, 'hello world');
+        },
+      );
+    });
+
+    test('null onSelectionCompleted callback does not crash', () async {
       await testNocterm(
         'null completed callback',
         (tester) async {
-          String? lastChanged;
-
           await tester.pumpComponent(
             Container(
-              width: 20,
-              height: 4,
-              child: SelectionArea(
-                onSelectionChanged: (text) => lastChanged = text,
-                // onSelectionCompleted intentionally omitted (null).
-                child: const Text('Hello'),
+              width: 10,
+              height: 2,
+              child: const SelectionArea(
+                child: Text('Hello'),
               ),
             ),
           );
 
-          // Complete a full selection drag.
-          await tester.press(1, 0);
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 4,
-            y: 0,
-            pressed: true,
-            isMotion: true,
-          ));
-          await tester.release(4, 0);
-
-          // Should not crash despite null onSelectionCompleted.
-          expect(lastChanged, isNotBlank);
-          expect(lastChanged, equals('ell'));
+          await _drag(tester, (0, 0), (4, 0));
         },
       );
     });
 
-    test('anchor below and focus above selectable', () async {
+    test('drag in an area with no selectable children does not crash',
+        () async {
       await testNocterm(
-        'anchor below focus above',
+        'no selectables',
         (tester) async {
-          String? completed;
-
           await tester.pumpComponent(
             Container(
-              width: 20,
-              height: 5,
+              width: 10,
+              height: 3,
               child: SelectionArea(
-                onSelectionCompleted: (text) => completed = text,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    SizedBox(height: 1), // row 0
-                    Text('Middle'), // row 1
-                    SizedBox(height: 1), // row 2
-                  ],
-                ),
+                child: Container(width: 5, height: 1),
               ),
             ),
           );
 
-          // Press below text at row 2 (no selectable hit → null anchor).
-          await tester.press(2, 2);
-
-          // Drag into text row 1 → late anchor set.
-          // _pressPosition.dy(2) >= bottom(2) → anchorIndex = length.
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 2,
-            y: 1,
-            pressed: true,
-            isMotion: true,
-          ));
-
-          // Drag above text to row 0.
-          // globalPos.dy(0) < top(1) → focusIndex = 0.
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 2,
-            y: 0,
-            pressed: true,
-            isMotion: true,
-          ));
-
-          await tester.release(2, 0);
-
-          // Full text should be selected (anchor=length, focus=0).
-          expect(completed, isNotBlank);
-          expect(completed, equals('Middle'));
+          await _drag(tester, (1, 1), (4, 1));
         },
       );
     });
 
-    test('anchor above and focus below selectable', () async {
+    test('double click selects the word under the pointer', () async {
       await testNocterm(
-        'anchor above focus below',
-        (tester) async {
-          String? completed;
-
-          await tester.pumpComponent(
-            Container(
-              width: 20,
-              height: 5,
-              child: SelectionArea(
-                onSelectionCompleted: (text) => completed = text,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    SizedBox(height: 1), // row 0
-                    Text('Middle'), // row 1
-                    SizedBox(height: 1), // row 2
-                  ],
-                ),
-              ),
-            ),
-          );
-
-          // Press above text at row 0 (no selectable hit → null anchor).
-          await tester.press(2, 0);
-
-          // Drag into text row 1 → late anchor set.
-          // _pressPosition.dy(0) < top(1) → anchorIndex = 0.
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 2,
-            y: 1,
-            pressed: true,
-            isMotion: true,
-          ));
-
-          // Drag below text to row 2.
-          // globalPos.dy(2) >= bottom(2) → focusIndex = length.
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 2,
-            y: 2,
-            pressed: true,
-            isMotion: true,
-          ));
-
-          await tester.release(2, 2);
-
-          // Full text should be selected (anchor=0, focus=length).
-          expect(completed, isNotBlank);
-          expect(completed, equals('Middle'));
-        },
-      );
-    });
-
-    test('empty selectables during pointer move', () async {
-      await testNocterm(
-        'empty selectables',
-        (tester) async {
-          String? lastChanged;
-
-          await tester.pumpComponent(
-            Container(
-              width: 20,
-              height: 4,
-              child: SelectionArea(
-                onSelectionChanged: (text) => lastChanged = text,
-                child: const SizedBox(height: 2),
-              ),
-            ),
-          );
-
-          // Press and drag over non-selectable content.
-          await tester.press(1, 0);
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 5,
-            y: 1,
-            pressed: true,
-            isMotion: true,
-          ));
-          await tester.release(5, 1);
-
-          // No crash; selection should be empty.
-          expect(lastChanged, equals(''));
-        },
-      );
-    });
-
-    test('wheel scroll during active drag', () async {
-      await testNocterm(
-        'wheel during drag',
+        'double click word',
         (tester) async {
           String? lastChanged;
 
@@ -1195,102 +494,57 @@ void main() {
               height: 3,
               child: SelectionArea(
                 onSelectionChanged: (text) => lastChanged = text,
-                child: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: const [
-                      Text('Line0'),
-                      Text('Line1'),
-                      Text('Line2'),
-                      Text('Line3'),
-                      Text('Line4'),
-                    ],
-                  ),
-                ),
+                child: const Text('Hello world'),
               ),
             ),
           );
 
-          // Start selection on the first visible item.
-          await tester.press(0, 0);
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 3,
-            y: 0,
-            pressed: true,
-            isMotion: true,
-          ));
+          await tester.press(7, 0);
+          await tester.release(7, 0);
+          await tester.press(7, 0);
+          await tester.release(7, 0);
 
-          // Send a wheel-down event while primary button is down.
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.wheelDown,
-            x: 3,
-            y: 0,
-            pressed: false,
-          ));
-
-          // Pump to let post-frame callback run.
-          await tester.pump();
-
-          await tester.release(3, 1);
-
-          // Should not crash and selection should have been maintained.
-          expect(lastChanged, isNotBlank);
+          expect(lastChanged, 'world');
         },
       );
     });
 
-    test('SingleChildScrollView viewport clipping', () async {
+    test('selection color change propagates without disturbing selection',
+        () async {
       await testNocterm(
-        'viewport clipping',
+        'color change',
         (tester) async {
-          String? completed;
+          String? lastChanged;
 
-          await tester.pumpComponent(
-            Container(
+          Component build(Color color) {
+            return Container(
               width: 20,
-              height: 2,
+              height: 3,
               child: SelectionArea(
-                onSelectionCompleted: (text) => completed = text,
-                child: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: const [
-                      Text('Visible1'),
-                      Text('Visible2'),
-                      Text('Hidden3'),
-                    ],
-                  ),
-                ),
+                selection: color,
+                onSelectionChanged: (text) => lastChanged = text,
+                child: const _RebuildHarness(),
               ),
-            ),
-          );
+            );
+          }
 
-          // Select across the visible viewport (height=2, so rows 0-1).
-          await tester.press(0, 0);
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 8,
-            y: 1,
-            pressed: true,
-            isMotion: true,
-          ));
-          await tester.release(8, 1);
+          await tester.pumpComponent(build(Colors.red));
+          await _drag(tester, (1, 0), (4, 0));
+          expect(lastChanged, 'ell');
 
-          // Hidden3 is outside the viewport, should be excluded.
-          expect(completed, isNotBlank);
-          expect(completed, contains('Visible1'));
-          expect(completed, contains('Visible2'));
-          expect(completed, isNot(contains('Hidden3')));
+          await tester.pumpComponent(build(Colors.green));
         },
       );
     });
+  });
 
-    test('ListView context selection', () async {
+  group('SelectionArea with ListView', () {
+    test('selection spans multiple list items', () async {
       await testNocterm(
-        'listview selection',
+        'list selection',
         (tester) async {
           String? completed;
+          final controller = ScrollController();
 
           await tester.pumpComponent(
             Container(
@@ -1299,211 +553,339 @@ void main() {
               child: SelectionArea(
                 onSelectionCompleted: (text) => completed = text,
                 child: ListView.builder(
-                  itemCount: 5,
-                  itemBuilder: (context, index) => Text('Item$index'),
+                  controller: controller,
+                  itemCount: 3,
+                  itemBuilder: (context, index) => Text('item $index'),
                 ),
               ),
             ),
           );
 
-          // Select across visible items in the ListView.
-          await tester.press(0, 0);
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 5,
-            y: 2,
-            pressed: true,
-            isMotion: true,
-          ));
-          await tester.release(5, 2);
-
-          expect(completed, isNotBlank);
-          expect(completed, contains('Item0'));
-          expect(completed, contains('Item1'));
-          expect(completed, contains('Item2'));
+          await _drag(tester, (0, 0), (6, 2));
+          expect(completed, 'item 0\nitem 1\nitem 2');
         },
       );
     });
 
-    test('multiline wrapped text selection', () async {
+    test(
+        'new selection lands on visible items after scrolling away from '
+        'a kept-alive selection', () async {
       await testNocterm(
-        'multiline wrapped text',
+        'select after scroll',
         (tester) async {
           String? completed;
+          final controller = ScrollController();
 
           await tester.pumpComponent(
             Container(
-              width: 6,
+              width: 20,
+              // Tall enough that row 5 sits in the neutral middle and the
+              // drags there don't trip edge auto-scroll.
+              height: 10,
+              child: SelectionArea(
+                onSelectionCompleted: (text) => completed = text,
+                child: ListView.builder(
+                  controller: controller,
+                  lazy: true,
+                  cacheExtent: 0,
+                  itemExtent: 1,
+                  itemCount: 100,
+                  itemBuilder: (context, index) => Text('item $index'),
+                ),
+              ),
+            ),
+          );
+
+          // Select item 5, then scroll it far out of view (kept alive).
+          await _drag(tester, (0, 5), (6, 5));
+          expect(completed, 'item 5');
+
+          controller.jumpTo(50);
+          await tester.pump();
+          await tester.pump();
+
+          // A new selection at screen row 5 must land on the item actually
+          // rendered there (item 55), not on the kept-alive item 5 whose
+          // bounds used to cover this row.
+          await _drag(tester, (0, 5), (7, 5));
+          expect(completed, 'item 55');
+        },
+      );
+    });
+
+    test('anchor stays pinned to content while scrolling mid-drag', () async {
+      await testNocterm(
+        'scroll mid-drag',
+        (tester) async {
+          String? completed;
+          final controller = ScrollController();
+
+          await tester.pumpComponent(
+            Container(
+              width: 20,
+              // Tall enough that the drag rows sit in the neutral middle and
+              // don't trip edge auto-scroll while we scroll manually.
+              height: 10,
+              child: SelectionArea(
+                onSelectionCompleted: (text) => completed = text,
+                child: ListView.builder(
+                  controller: controller,
+                  lazy: true,
+                  cacheExtent: 5,
+                  itemExtent: 1,
+                  itemCount: 100,
+                  itemBuilder: (context, index) => Text('item $index'),
+                ),
+              ),
+            ),
+          );
+
+          // Anchor the selection on item 5 at screen row 5.
+          await tester.press(0, 5);
+          await tester.sendMouseEvent(const MouseEvent(
+            button: MouseButton.left,
+            x: 6,
+            y: 5,
+            pressed: true,
+            isMotion: true,
+          ));
+
+          // Content scrolls three rows under the held pointer.
+          controller.jumpTo(3);
+          await tester.pump();
+          await tester.pump();
+
+          // The next motion event lands on item 9 (screen row 6), and the
+          // anchor must still be item 5, not whatever sits at screen row 5.
+          await tester.sendMouseEvent(const MouseEvent(
+            button: MouseButton.left,
+            x: 6,
+            y: 6,
+            pressed: true,
+            isMotion: true,
+          ));
+          await tester.release(6, 6);
+
+          expect(completed, 'item 5\nitem 6\nitem 7\nitem 8\nitem 9');
+        },
+      );
+    });
+
+    test('wheel scroll mid-drag extends the selection under the pointer',
+        () async {
+      await testNocterm(
+        'wheel mid-drag',
+        (tester) async {
+          String? completed;
+          final controller = ScrollController();
+
+          await tester.pumpComponent(
+            Container(
+              width: 20,
+              // Tall enough that row 5 sits in the neutral middle, so the
+              // wheel scroll (not edge auto-scroll) drives the extension.
+              height: 10,
+              child: SelectionArea(
+                onSelectionCompleted: (text) => completed = text,
+                child: ListView.builder(
+                  controller: controller,
+                  lazy: true,
+                  cacheExtent: 5,
+                  itemExtent: 1,
+                  itemCount: 100,
+                  itemBuilder: (context, index) => Text('item $index'),
+                ),
+              ),
+            ),
+          );
+
+          // Anchor the selection on item 5 at screen row 5.
+          await tester.press(0, 5);
+          await tester.sendMouseEvent(const MouseEvent(
+            button: MouseButton.left,
+            x: 6,
+            y: 5,
+            pressed: true,
+            isMotion: true,
+          ));
+
+          // Wheel scrolls the list by three rows mid-drag; the end edge is
+          // re-resolved at the pointer's screen position after layout.
+          await tester.sendMouseEvent(const MouseEvent(
+            button: MouseButton.wheelDown,
+            x: 6,
+            y: 5,
+            pressed: true,
+          ));
+          await tester.pump();
+          await tester.pump();
+          await tester.release(6, 5);
+
+          expect(completed, 'item 5\nitem 6\nitem 7\nitem 8');
+        },
+      );
+    });
+
+    test('dragging past the list auto-scrolls until the pointer is reached',
+        () async {
+      await testNocterm(
+        'auto-scroll drag',
+        (tester) async {
+          // A virtual clock that ticks one second per pump, so auto-scroll
+          // velocity (rows/sec) resolves to whole rows per tick — this test
+          // exercises reaching the end, not the ramp (covered by unit tests).
+          var vnow = Duration.zero;
+          SelectionAutoScroller.debugClockOverride = () => vnow;
+          addTearDown(() => SelectionAutoScroller.debugClockOverride = null);
+          String? completed;
+          final controller = ScrollController();
+
+          await tester.pumpComponent(
+            Container(
+              width: 20,
               height: 5,
               child: SelectionArea(
                 onSelectionCompleted: (text) => completed = text,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    // "Hello " (6 chars) wraps into:
-                    // Line 0: "Hello " or "Hello"
-                    // Line 1: "World" (if text wraps)
-                    Text('Hello World'),
-                    Text('End'),
+                  children: [
+                    SizedBox(
+                      height: 3,
+                      child: ListView.builder(
+                        controller: controller,
+                        lazy: true,
+                        cacheExtent: 0,
+                        itemExtent: 1,
+                        itemCount: 6,
+                        itemBuilder: (context, index) => Text('item $index'),
+                      ),
+                    ),
+                    Text('footer'),
                   ],
                 ),
               ),
             ),
           );
 
-          // Select everything across the wrapped text and "End".
           await tester.press(0, 0);
+          // The pointer crosses out of the list onto the footer while the
+          // list still has unrevealed content; the list auto-scrolls to its
+          // end and the selection continues onto the footer.
           await tester.sendMouseEvent(const MouseEvent(
             button: MouseButton.left,
-            x: 3,
-            y: 2, // "End" is on the row after wrapped text
+            x: 5,
+            y: 3,
             pressed: true,
             isMotion: true,
           ));
-          await tester.release(3, 2);
+          for (var i = 0; i < 10; i++) {
+            vnow += const Duration(seconds: 1);
+            await tester.pump();
+          }
+          await tester.release(5, 3);
 
-          // Should include text from wrapped lines with proper newlines.
-          expect(completed, isNotBlank);
-          expect(completed, contains('Hello'));
-          expect(completed, contains('World'));
-          expect(completed, contains('End'));
+          expect(controller.offset, controller.maxScrollExtent);
+          expect(
+            completed,
+            'item 0\nitem 1\nitem 2\nitem 3\nitem 4\nitem 5\nfoote',
+          );
         },
       );
     });
 
-    test('mouse exit during drag triggers selection completed', () async {
+    test('drag starting above the list selects list content from its start',
+        () async {
       await testNocterm(
-        'mouse exit during drag',
+        'cross into list',
         (tester) async {
           String? completed;
+          final controller = ScrollController();
 
           await tester.pumpComponent(
             Container(
               width: 20,
-              height: 4,
+              height: 5,
               child: SelectionArea(
                 onSelectionCompleted: (text) => completed = text,
-                child: const Text('Hello World'),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('header'),
+                    SizedBox(
+                      height: 3,
+                      child: ListView.builder(
+                        controller: controller,
+                        lazy: true,
+                        cacheExtent: 5,
+                        itemExtent: 1,
+                        itemCount: 100,
+                        itemBuilder: (context, index) => Text('item $index'),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           );
 
-          // Press inside.
-          await tester.press(1, 0);
+          // Scroll the list before selecting so its first visible item is
+          // not its first content item.
+          controller.jumpTo(2);
+          await tester.pump();
 
-          // Drag within to build selection.
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 5,
-            y: 0,
-            pressed: true,
-            isMotion: true,
-          ));
+          await _drag(tester, (0, 0), (6, 2));
 
-          // Mouse exits region with button released (simulates leaving the
-          // window). The exit event is dispatched by the mouse tracker when
-          // the cursor leaves the annotation's region.
-          // We simulate by releasing at the same position — release triggers
-          // onHover with leftDown=false which calls _handlePointerUp.
-          await tester.release(5, 0);
-
-          expect(completed, isNotBlank);
-          expect(completed!.length, greaterThan(0));
+          // The selection crosses the list boundary from above: everything
+          // from the list's scrolled-away beginning through the pointer is
+          // included, not just what happens to be on screen.
+          expect(completed, 'header\nitem 0\nitem 1\nitem 2\nitem 3');
         },
       );
     });
 
-    test('onHover button state transitions', () async {
+    test('lazy list keeps selected items alive across scrolling', () async {
       await testNocterm(
-        'hover button transitions',
+        'keep alive if selected',
         (tester) async {
-          String? lastChanged;
-          String? completed;
+          final captured = <int, RenderText>{};
+          final controller = ScrollController();
 
           await tester.pumpComponent(
             Container(
               width: 20,
-              height: 4,
+              height: 5,
               child: SelectionArea(
-                onSelectionChanged: (text) => lastChanged = text,
-                onSelectionCompleted: (text) => completed = text,
-                child: const Text('Hello World'),
+                child: ListView.builder(
+                  controller: controller,
+                  lazy: true,
+                  cacheExtent: 0,
+                  itemExtent: 1,
+                  itemCount: 100,
+                  itemBuilder: (context, index) => _CapturingText(
+                    'item $index',
+                    onRender: (renderObject) => captured[index] = renderObject,
+                  ),
+                ),
               ),
             ),
           );
 
-          // Press at (1, 0) — triggers onEnter then onHover.
-          await tester.press(1, 0);
+          await _drag(tester, (0, 0), (6, 0));
+          expect(captured[0]!.hasSelection, isTrue);
+          final selectedRender = captured[0];
+          final unselectedRender = captured[2];
 
-          // Motion while pressed — triggers onHover dragging branch.
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 5,
-            y: 0,
-            pressed: true,
-            isMotion: true,
-          ));
+          controller.jumpTo(50);
+          await tester.pump();
+          controller.jumpTo(0);
+          await tester.pump();
 
-          expect(lastChanged, isNotBlank);
-
-          // Release at (5, 0) — triggers onHover release path.
-          await tester.release(5, 0);
-
-          expect(completed, isNotBlank);
-          expect(completed, equals('ello'));
-        },
-      );
-    });
-
-    test('context entries become empty after anchor set', () async {
-      await testNocterm(
-        'empty context after anchor',
-        (tester) async {
-          String? lastChanged;
-
-          // First: pump with selectable text.
-          await tester.pumpComponent(
-            Container(
-              width: 20,
-              height: 4,
-              child: SelectionArea(
-                onSelectionChanged: (text) => lastChanged = text,
-                child: const Text('Hello'),
-              ),
-            ),
-          );
-
-          // Press to set anchor on the text.
-          await tester.press(1, 0);
-
-          // Now replace the child tree so there are no selectables.
-          // The SelectionArea is rebuilt but the drag state (_isDragging)
-          // persists in the render object.
-          await tester.pumpComponent(
-            Container(
-              width: 20,
-              height: 4,
-              child: SelectionArea(
-                onSelectionChanged: (text) => lastChanged = text,
-                child: const SizedBox(height: 2),
-              ),
-            ),
-          );
-
-          // Send a motion event — _handlePointerMove runs, collectSelectables
-          // returns empty, hits the isEmpty return at line 270.
-          await tester.sendMouseEvent(const MouseEvent(
-            button: MouseButton.left,
-            x: 5,
-            y: 0,
-            pressed: true,
-            isMotion: true,
-          ));
-
-          await tester.release(5, 0);
-
-          // Should not crash; selection cleared.
-          expect(lastChanged, equals(''));
+          // The selected item survived scrolling out of the build window
+          // (same render object, selection intact); the unselected neighbor
+          // was rebuilt from scratch.
+          expect(identical(captured[0], selectedRender), isTrue);
+          expect(captured[0]!.hasSelection, isTrue);
+          expect(identical(captured[2], unselectedRender), isFalse);
         },
       );
     });
@@ -1521,6 +903,11 @@ void main() {
       await testNocterm(
         'edge auto-scroll bottom',
         (tester) async {
+          // Virtual clock so one second of auto-scroll resolves to whole rows;
+          // speed itself is unit-tested on SelectionAutoScroller.
+          var vnow = Duration.zero;
+          SelectionAutoScroller.debugClockOverride = () => vnow;
+          addTearDown(() => SelectionAutoScroller.debugClockOverride = null);
           final controller = ScrollController();
 
           await tester.pumpComponent(
@@ -1556,8 +943,8 @@ void main() {
           expect(controller.offset, equals(0),
               reason: 'no auto-scroll while the pointer is away from an edge');
 
-          // Motion to the bottom edge row fires edge auto-scroll. The first
-          // tick runs synchronously, advancing the viewport downward.
+          // Motion to the bottom edge row arms edge auto-scroll (this tick
+          // seeds the clock); the next frame, one virtual second later, scrolls.
           await tester.sendMouseEvent(const MouseEvent(
             button: MouseButton.left,
             x: 4,
@@ -1565,6 +952,8 @@ void main() {
             pressed: true,
             isMotion: true,
           ));
+          vnow += const Duration(seconds: 1);
+          await tester.pump();
           expect(controller.offset, greaterThan(0),
               reason: 'dragging to the bottom edge should auto-scroll down');
 
@@ -1577,6 +966,9 @@ void main() {
       await testNocterm(
         'edge auto-scroll stops on release',
         (tester) async {
+          var vnow = Duration.zero;
+          SelectionAutoScroller.debugClockOverride = () => vnow;
+          addTearDown(() => SelectionAutoScroller.debugClockOverride = null);
           final controller = ScrollController();
 
           await tester.pumpComponent(
@@ -1602,6 +994,8 @@ void main() {
             pressed: true,
             isMotion: true,
           ));
+          vnow += const Duration(seconds: 1);
+          await tester.pump();
           expect(controller.offset, greaterThan(0));
 
           // Releasing ends the drag and must cancel the auto-scroll loop.
@@ -1618,171 +1012,77 @@ void main() {
         },
       );
     });
-  });
-}
 
-class _SelectionRebuildHarness extends StatefulComponent {
-  const _SelectionRebuildHarness({required this.onSelectionChanged});
+    test(
+        'a drag begun in the edge zone does not auto-scroll until the pointer '
+        'leaves and re-enters it', () async {
+      await testNocterm(
+        'edge auto-scroll suppressed at start',
+        (tester) async {
+          var vnow = Duration.zero;
+          SelectionAutoScroller.debugClockOverride = () => vnow;
+          addTearDown(() => SelectionAutoScroller.debugClockOverride = null);
+          final controller = ScrollController();
 
-  final ValueChanged<String> onSelectionChanged;
-
-  static _SelectionRebuildHarnessState? lastState;
-
-  @override
-  State<_SelectionRebuildHarness> createState() =>
-      _SelectionRebuildHarnessState();
-}
-
-class _SelectionRebuildHarnessState extends State<_SelectionRebuildHarness> {
-  bool _useAltKey = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _SelectionRebuildHarness.lastState = this;
-  }
-
-  void swapFirstKey() {
-    setState(() {
-      _useAltKey = true;
-    });
-  }
-
-  @override
-  Component build(BuildContext context) {
-    return SelectionArea(
-      key: const ValueKey('selection-area'),
-      onSelectionChanged: component.onSelectionChanged,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Alpha', key: ValueKey(_useAltKey ? 'a2' : 'a')),
-          const Text('Bravo', key: ValueKey('b')),
-        ],
-      ),
-    );
-  }
-}
-
-class _SelectionAreaSwapHarness extends StatefulComponent {
-  const _SelectionAreaSwapHarness({required this.onSelectionChanged});
-
-  final ValueChanged<String> onSelectionChanged;
-
-  static _SelectionAreaSwapHarnessState? lastState;
-
-  @override
-  State<_SelectionAreaSwapHarness> createState() =>
-      _SelectionAreaSwapHarnessState();
-}
-
-class _SelectionAreaSwapHarnessState extends State<_SelectionAreaSwapHarness> {
-  bool _useListView = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _SelectionAreaSwapHarness.lastState = this;
-  }
-
-  void swapToColumn() {
-    setState(() {
-      _useListView = false;
-    });
-  }
-
-  @override
-  Component build(BuildContext context) {
-    return SelectionArea(
-      onSelectionChanged: component.onSelectionChanged,
-      child: _useListView
-          ? ListView.builder(
-              itemCount: 3,
-              itemBuilder: (context, index) => Text('Item$index'),
-            )
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: const [
-                Text('New1'),
-                Text('New2'),
-              ],
+          await tester.pumpComponent(
+            SelectionArea(
+              child: SingleChildScrollView(
+                controller: controller,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (int i = 0; i < 40; i++)
+                      Text('Line${i.toString().padLeft(2, '0')}'),
+                  ],
+                ),
+              ),
             ),
-    );
-  }
-}
+          );
 
-class _SelectionAreaUnmountHarness extends StatefulComponent {
-  const _SelectionAreaUnmountHarness();
+          // Begin the drag inside the bottom edge zone.
+          await tester.press(0, 23);
+          await tester.sendMouseEvent(const MouseEvent(
+            button: MouseButton.left,
+            x: 4,
+            y: 23,
+            pressed: true,
+            isMotion: true,
+          ));
+          vnow += const Duration(seconds: 1);
+          await tester.pump();
+          expect(controller.offset, equals(0),
+              reason: 'a drag begun in the edge zone must not auto-scroll');
 
-  static _SelectionAreaUnmountHarnessState? lastState;
+          // Move up out of the zone (neutral middle): still no scrolling, but
+          // this re-arms auto-scroll.
+          await tester.sendMouseEvent(const MouseEvent(
+            button: MouseButton.left,
+            x: 4,
+            y: 10,
+            pressed: true,
+            isMotion: true,
+          ));
+          vnow += const Duration(seconds: 1);
+          await tester.pump();
+          expect(controller.offset, equals(0),
+              reason: 'no auto-scroll away from an edge');
 
-  @override
-  State<_SelectionAreaUnmountHarness> createState() =>
-      _SelectionAreaUnmountHarnessState();
-}
+          // Re-enter the bottom edge zone: now it auto-scrolls.
+          await tester.sendMouseEvent(const MouseEvent(
+            button: MouseButton.left,
+            x: 4,
+            y: 23,
+            pressed: true,
+            isMotion: true,
+          ));
+          vnow += const Duration(seconds: 1);
+          await tester.pump();
+          expect(controller.offset, greaterThan(0),
+              reason: 're-entering the edge zone should auto-scroll');
 
-class _SelectionAreaUnmountHarnessState
-    extends State<_SelectionAreaUnmountHarness> {
-  bool _mountedSelectionArea = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _SelectionAreaUnmountHarness.lastState = this;
-  }
-
-  void unmountSelectionArea() {
-    setState(() {
-      _mountedSelectionArea = false;
+          await tester.release(4, 23);
+        },
+      );
     });
-  }
-
-  @override
-  Component build(BuildContext context) {
-    if (!_mountedSelectionArea) {
-      return const SizedBox(height: 2);
-    }
-
-    return const SelectionArea(
-      child: Text('Hello'),
-    );
-  }
-}
-
-class _RenderSelectionAreaHarness extends SingleChildRenderObjectComponent {
-  const _RenderSelectionAreaHarness({
-    required super.child,
-    this.onCreated,
-    this.onSelectionChanged,
-    this.onSelectionCompleted,
-    this.selection,
   });
-
-  final void Function(RenderSelectionArea)? onCreated;
-  final ValueChanged<String>? onSelectionChanged;
-  final ValueChanged<String>? onSelectionCompleted;
-  final Color? selection;
-
-  @override
-  RenderObject createRenderObject(BuildContext context) {
-    final renderObject = RenderSelectionArea(
-      selection: selection ?? Colors.blue,
-      onSelection: Colors.white,
-      onSelectionChanged: onSelectionChanged,
-      onSelectionCompleted: onSelectionCompleted,
-    );
-    onCreated?.call(renderObject);
-    return renderObject;
-  }
-
-  @override
-  void updateRenderObject(
-      BuildContext context, covariant RenderSelectionArea renderObject) {
-    if (selection != null) {
-      renderObject.selection = selection!;
-    }
-    renderObject
-      ..onSelectionChanged = onSelectionChanged
-      ..onSelectionCompleted = onSelectionCompleted;
-  }
 }

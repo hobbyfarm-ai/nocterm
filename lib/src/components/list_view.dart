@@ -4,7 +4,6 @@ import 'package:nocterm/nocterm.dart';
 import 'package:nocterm/src/framework/terminal_canvas.dart';
 
 import '../rendering/scrollable_render_object.dart';
-import 'selection_state.dart';
 
 /// Signature for a function that creates a widget for a given index.
 typedef IndexedWidgetBuilder = Component? Function(
@@ -141,6 +140,7 @@ class ListView extends StatefulComponent {
 
 class _ListViewState extends State<ListView> {
   ScrollController? _controller;
+  ScrollableSelectionContainerDelegate? _selectionDelegate;
 
   ScrollController get _effectiveController =>
       component.controller ?? _controller!;
@@ -169,6 +169,7 @@ class _ListViewState extends State<ListView> {
 
   @override
   void dispose() {
+    _selectionDelegate?.dispose();
     _controller?.dispose();
     super.dispose();
   }
@@ -232,6 +233,21 @@ class _ListViewState extends State<ListView> {
       itemCount: component.itemCount,
     );
 
+    // Scrolled content needs its own scroll-aware selection delegate so an
+    // in-progress selection stays pinned to the content while it moves.
+    final registrar = SelectionRegistrarScope.maybeOf(context);
+    if (registrar != null) {
+      final delegate = _selectionDelegate ??=
+          ScrollableSelectionContainerDelegate(
+              controller: _effectiveController);
+      delegate.controller = _effectiveController;
+      viewport = SelectionContainer(
+        registrar: registrar,
+        delegate: delegate,
+        child: viewport,
+      );
+    }
+
     // Wrap with Focusable for keyboard scrolling if enabled
     if (component.keyboardScrollable) {
       viewport = Focusable(
@@ -276,7 +292,6 @@ class _ListViewport extends RenderObjectComponent {
 
   @override
   RenderObject createRenderObject(BuildContext context) {
-    final scope = SelectionScope.maybeOf(context);
     return RenderListViewport(
       scrollDirection: scrollDirection,
       reverse: reverse,
@@ -286,15 +301,12 @@ class _ListViewport extends RenderObjectComponent {
       lazy: lazy,
       cacheExtent: cacheExtent,
       hasSeparators: separatorBuilder != null,
-      selectionDragActive: scope?.isActive ?? false,
-      selectionRangeFor: scope?.rangeFor,
     );
   }
 
   @override
   void updateRenderObject(
       BuildContext context, RenderListViewport renderObject) {
-    final scope = SelectionScope.maybeOf(context);
     renderObject
       ..scrollDirection = scrollDirection
       ..reverse = reverse
@@ -303,9 +315,7 @@ class _ListViewport extends RenderObjectComponent {
       ..itemExtent = itemExtent
       ..lazy = lazy
       ..cacheExtent = cacheExtent
-      ..hasSeparators = separatorBuilder != null
-      ..selectionDragActive = scope?.isActive ?? false
-      ..selectionRangeFor = scope?.rangeFor;
+      ..hasSeparators = separatorBuilder != null;
   }
 }
 
@@ -348,19 +358,21 @@ class _ListViewportElement extends RenderObjectElement {
   void update(Component newComponent) {
     super.update(newComponent);
 
-    final newViewport = newComponent as _ListViewport;
-
-    // Remove cached children that are beyond the new item count.
-    // Items are keyed by index, separators by -index - 1 (a separator
-    // follows every item except the last, so valid separator indices are
-    // 0..itemCount - 2).
-    final newItemCount = newViewport.itemCount;
+    // Tear down cached children whose item no longer exists in the list, so
+    // their render objects are disposed rather than leaked. Items are keyed
+    // by index, separators by -index-1; a separator follows every item except
+    // the last, so a separator index >= itemCount-1 is stale.
+    final newItemCount = (newComponent as _ListViewport).itemCount;
     if (newItemCount != null) {
-      _children.removeWhere((key, _) {
+      final removedKeys = _children.keys.where((key) {
         if (key >= 0) return key >= newItemCount;
-        final separatorIndex = -key - 1;
-        return separatorIndex >= newItemCount - 1;
-      });
+        return (-key - 1) >= newItemCount - 1;
+      }).toList();
+      for (final key in removedKeys) {
+        _teardownChild(_children[key]!);
+        _children.remove(key);
+      }
+
     }
 
     // Mark that children need to be updated with new props
@@ -409,6 +421,33 @@ class _ListViewportElement extends RenderObjectElement {
     // This is not used in our implementation
   }
 
+  /// Deactivates and unmounts a child subtree, disposing its render objects.
+  ///
+  /// Mirrors the build owner's inactive-element finalization; children are
+  /// torn down here synchronously (mid-layout) rather than through
+  /// [Element.deactivateChild] because the frame's finalize pass has already
+  /// run by the time layout culls them. Skipping disposal leaks the render
+  /// objects — they stay registered with listeners such as selection
+  /// registrars and keep receiving events at stale positions.
+  void _teardownChild(Element child) {
+    if (!child.mounted) return;
+    _deactivateSubtree(child);
+    _unmountSubtree(child);
+  }
+
+  static void _deactivateSubtree(Element element) {
+    element.deactivate();
+    element.visitChildren(_deactivateSubtree);
+  }
+
+  static void _unmountSubtree(Element element) {
+    element.visitChildren(_unmountSubtree);
+    if (element is RenderObjectElement) {
+      element.renderObject.dispose();
+    }
+    element.unmount();
+  }
+
   /// Builds or updates a child at the given index.
   Element? buildChild(int index) {
     // Check if index is valid
@@ -431,8 +470,7 @@ class _ListViewportElement extends RenderObjectElement {
       final newChild = component.itemBuilder(this, index);
       if (newChild == null) {
         // Item no longer exists, remove cached element
-        existingChild.deactivate();
-        existingChild.unmount();
+        _teardownChild(existingChild);
         _children.remove(index);
         return null;
       }
@@ -443,8 +481,7 @@ class _ListViewportElement extends RenderObjectElement {
         return existingChild;
       } else {
         // Can't update, replace element
-        existingChild.deactivate();
-        existingChild.unmount();
+        _teardownChild(existingChild);
         // ignore: invalid_use_of_protected_member
         final element = newChild.createElement();
         _children[index] = element;
@@ -482,7 +519,7 @@ class _ListViewportElement extends RenderObjectElement {
       oldSeparator.update(separator);
       return oldSeparator;
     } else {
-      oldSeparator?.unmount();
+      if (oldSeparator != null) _teardownChild(oldSeparator);
       // ignore: invalid_use_of_protected_member
       final newSeparator = separator.createElement();
       _children[separatorIndex] = newSeparator;
@@ -492,7 +529,11 @@ class _ListViewportElement extends RenderObjectElement {
   }
 
   /// Removes children that are no longer visible.
-  void removeInvisibleChildren(int firstIndex, int lastIndex) {
+  void removeInvisibleChildren(
+    int firstIndex,
+    int lastIndex, {
+    bool Function(Element child)? keepAlive,
+  }) {
     final keysToRemove = <int>[];
     for (final key in _children.keys) {
       if (key >= 0) {
@@ -512,11 +553,8 @@ class _ListViewportElement extends RenderObjectElement {
     for (final key in keysToRemove) {
       final child = _children[key];
       if (child != null) {
-        // Properly deactivate and unmount the element
-        if (child.mounted) {
-          child.deactivate();
-          child.unmount();
-        }
+        if (keepAlive != null && keepAlive(child)) continue;
+        _teardownChild(child);
       }
       _children.remove(key);
     }
@@ -539,8 +577,6 @@ class RenderListViewport extends RenderObject with ScrollableRenderObjectMixin {
     bool lazy = false,
     double cacheExtent = 250.0,
     bool hasSeparators = false,
-    bool selectionDragActive = false,
-    SelectionRange? Function(Object context)? selectionRangeFor,
   })  : _scrollDirection = scrollDirection,
         _reverse = reverse,
         _controller = controller,
@@ -548,15 +584,9 @@ class RenderListViewport extends RenderObject with ScrollableRenderObjectMixin {
         _itemExtent = itemExtent,
         _lazy = lazy,
         _cacheExtent = cacheExtent,
-        _hasSeparators = hasSeparators,
-        _selectionDragActive = selectionDragActive,
-        _selectionRangeFor = selectionRangeFor {
+        _hasSeparators = hasSeparators {
     _controller.addListener(_handleScrollUpdate);
     _controller.attach(this);
-    // Selection drag state is a global, so we subscribe explicitly -
-    // changes there affect whether performLayout force-builds the selection
-    // range but wouldn't otherwise propagate through the normal dirty path.
-    SelectionDragState.addListener(markNeedsLayout);
   }
 
   _ListViewportElement? _element;
@@ -637,25 +667,6 @@ class RenderListViewport extends RenderObject with ScrollableRenderObjectMixin {
     }
   }
 
-  bool _selectionDragActive;
-  bool get selectionDragActive => _selectionDragActive;
-  set selectionDragActive(bool value) {
-    if (_selectionDragActive != value) {
-      _selectionDragActive = value;
-      markNeedsLayout();
-    }
-  }
-
-  SelectionRange? Function(Object context)? _selectionRangeFor;
-  SelectionRange? Function(Object context)? get selectionRangeFor =>
-      _selectionRangeFor;
-  set selectionRangeFor(SelectionRange? Function(Object context)? value) {
-    if (_selectionRangeFor != value) {
-      _selectionRangeFor = value;
-      markNeedsLayout();
-    }
-  }
-
   void _handleScrollUpdate() {
     markNeedsLayout();
   }
@@ -716,18 +727,16 @@ class RenderListViewport extends RenderObject with ScrollableRenderObjectMixin {
   void dispose() {
     _controller.removeListener(_handleScrollUpdate);
     _controller.detach(this);
-    SelectionDragState.removeListener(markNeedsLayout);
     super.dispose();
   }
 
   /// Information about visible children after layout.
   final List<_ChildLayoutInfo> _visibleChildren = [];
 
-  /// All built children (viewport + force-built for selection).
+  /// All built children, including cache-extent items outside the viewport.
   final List<_ChildLayoutInfo> _allChildren = [];
 
-  /// Render objects already in [_allChildren], used to avoid duplicates when
-  /// [_forceBuildSelectionRange] overlaps with the viewport range.
+  /// Render objects already in [_allChildren], used to avoid duplicates.
   final Set<RenderObject> _allChildrenSet = {};
 
   /// First and last item indices that were built (includes cache area).
@@ -796,6 +805,11 @@ class RenderListViewport extends RenderObject with ScrollableRenderObjectMixin {
 
   /// Finds the best starting index for layout given a scroll offset.
   /// Uses parent data on children for O(n) lookup through existing children.
+  ///
+  /// Searches the element's retained children — not the per-layout child
+  /// lists, which have already been cleared when this runs. Their parent
+  /// data keeps the content layout offsets from the pass that built them,
+  /// so a resumed layout can start at the cache window instead of item 0.
   (int index, double position) _findStartingPosition(double scrollOffset) {
     if (itemExtent != null) {
       // Fixed extent - exact calculation
@@ -803,21 +817,23 @@ class RenderListViewport extends RenderObject with ScrollableRenderObjectMixin {
       return (index, index * itemExtent!);
     }
 
-    if (_allChildren.isEmpty) {
-      return (0, 0.0);
-    }
+    final element = _element;
+    if (element == null) return (0, 0.0);
 
     // Find the child closest to (but not past) the scroll offset
     int bestIndex = 0;
     double bestOffset = 0.0;
 
-    for (final child in _allChildren) {
-      final parentData = child.renderObject.parentData as ListViewParentData?;
-      if (parentData?.layoutOffset == null || parentData?.index == null) {
+    for (final entry in element._children.entries) {
+      if (entry.key < 0) continue; // Separators resolve via their items.
+      final renderObject = _getRenderObject(entry.value);
+      final parentData = renderObject?.parentData;
+      if (parentData is! ListViewParentData) continue;
+      if (parentData.layoutOffset == null || parentData.index == null) {
         continue;
       }
 
-      final offset = parentData!.layoutOffset!;
+      final offset = parentData.layoutOffset!;
       final index = parentData.index!;
       if (offset <= scrollOffset && offset >= bestOffset) {
         bestIndex = index;
@@ -905,21 +921,14 @@ class RenderListViewport extends RenderObject with ScrollableRenderObjectMixin {
       axisDirection: axisDirection,
     );
 
-    // Clean up children outside the cached range in lazy mode
-    // Use scope-based selection state, falling back to global for backwards compat
-    final isSelectionActive =
-        _selectionDragActive || SelectionDragState.isActive;
-    if (_lazy && !isSelectionActive) {
+    // Clean up children outside the cached range in lazy mode, keeping
+    // items that hold part of an active selection alive so the selection
+    // survives scrolling and can still be copied.
+    if (_lazy) {
       _element!.removeInvisibleChildren(
         _firstBuiltIndex,
         _lastBuiltIndex,
-      );
-    }
-
-    if (_lazy && isSelectionActive) {
-      _forceBuildSelectionRange(
-        childConstraints: childConstraints,
-        itemCount: itemCount,
+        keepAlive: _keepAliveForSelection,
       );
     }
 
@@ -939,25 +948,54 @@ class RenderListViewport extends RenderObject with ScrollableRenderObjectMixin {
   }) {
     final scrollOffset = _controller.offset;
     for (final child in _allChildren) {
-      final renderObject = child.renderObject;
-      final parentData = renderObject.parentData as ListViewParentData;
-      final layoutOffset = parentData.layoutOffset ?? 0.0;
-      final childExtent = parentData.extent ??
-          (scrollDirection == Axis.vertical
-              ? renderObject.size.height
-              : renderObject.size.width);
-      double childPosition = layoutOffset - scrollOffset;
-
-      if (_reverse) {
-        childPosition = viewportExtent - childPosition - childExtent;
-      }
-
-      final childOffset = scrollDirection == Axis.vertical
-          ? Offset(effectivePadding.left, effectivePadding.top + childPosition)
-          : Offset(effectivePadding.left + childPosition, effectivePadding.top);
-
-      parentData.offset = childOffset;
+      _applyViewportOffset(
+        child.renderObject,
+        scrollOffset: scrollOffset,
+        effectivePadding: effectivePadding,
+        viewportExtent: viewportExtent,
+      );
     }
+
+    // Kept-alive children outside the built range are not painted, but
+    // their offsets must stay truthful so selection screen-order sorting
+    // and edge resolution don't land on the rows they used to occupy.
+    final element = _element;
+    if (element == null) return;
+    final built = {for (final child in _allChildren) child.renderObject};
+    for (final childElement in element._children.values) {
+      final renderObject = _getRenderObject(childElement);
+      if (renderObject == null || built.contains(renderObject)) continue;
+      _applyViewportOffset(
+        renderObject,
+        scrollOffset: scrollOffset,
+        effectivePadding: effectivePadding,
+        viewportExtent: viewportExtent,
+      );
+    }
+  }
+
+  void _applyViewportOffset(
+    RenderObject renderObject, {
+    required double scrollOffset,
+    required EdgeInsets effectivePadding,
+    required double viewportExtent,
+  }) {
+    final parentData = renderObject.parentData;
+    if (parentData is! ListViewParentData) return;
+    final layoutOffset = parentData.layoutOffset ?? 0.0;
+    final childExtent = parentData.extent ??
+        (scrollDirection == Axis.vertical
+            ? renderObject.size.height
+            : renderObject.size.width);
+    double childPosition = layoutOffset - scrollOffset;
+
+    if (_reverse) {
+      childPosition = viewportExtent - childPosition - childExtent;
+    }
+
+    parentData.offset = scrollDirection == Axis.vertical
+        ? Offset(effectivePadding.left, effectivePadding.top + childPosition)
+        : Offset(effectivePadding.left + childPosition, effectivePadding.top);
   }
 
   /// Performs lazy layout - only builds visible children
@@ -1160,74 +1198,24 @@ class RenderListViewport extends RenderObject with ScrollableRenderObjectMixin {
     return currentPosition; // Exact total extent
   }
 
-  void _forceBuildSelectionRange({
-    required BoxConstraints childConstraints,
-    required int? itemCount,
-  }) {
-    if (_element == null) return;
-    // Use scope-based range, falling back to global for backwards compat
-    final range =
-        _selectionRangeFor?.call(this) ?? SelectionDragState.rangeFor(this);
-    if (range == null) return;
+  bool _keepAliveForSelection(Element child) {
+    final renderObject = _getRenderObject(child);
+    if (renderObject == null) return false;
+    return _subtreeHasSelection(renderObject);
+  }
 
-    final maxIndex = itemCount != null
-        ? range.maxIndex.clamp(0, itemCount - 1)
-        : range.maxIndex;
-    final minIndex = range.minIndex.clamp(0, maxIndex);
-
-    if (!hasSeparators && itemExtent != null) {
-      for (int index = minIndex; index <= maxIndex; index++) {
-        final renderObject = _buildAndLayoutChild(
-          index: index,
-          childConstraints: childConstraints,
-          layoutOffset: index * itemExtent!,
-          extentOverride: itemExtent,
-        );
-        if (renderObject == null) break;
-
-        _addToAllChildren(renderObject);
-      }
-      return;
+  static bool _subtreeHasSelection(RenderObject node) {
+    // Only an uncollapsed selection is worth keeping an item alive for;
+    // collapsed edges are re-synthesized if the item ever remounts.
+    if (node is Selectable &&
+        (node as Selectable).value.status == SelectionStatus.uncollapsed) {
+      return true;
     }
-
-    double currentPosition = 0.0;
-    final lastIndex = itemCount != null ? itemCount - 1 : maxIndex;
-
-    for (int index = 0; index <= lastIndex && index <= maxIndex; index++) {
-      final renderObject = _buildAndLayoutChild(
-        index: index,
-        childConstraints: childConstraints,
-        layoutOffset: currentPosition,
-      );
-      if (renderObject == null) break;
-
-      final childExtent =
-          (renderObject.parentData as ListViewParentData).extent!;
-
-      if (index >= minIndex) {
-        _addToAllChildren(renderObject);
-      }
-
-      currentPosition += childExtent;
-
-      if (hasSeparators && index < lastIndex) {
-        final separatorRenderObject = _buildAndLayoutSeparator(
-          index: index,
-          childConstraints: childConstraints,
-          layoutOffset: currentPosition,
-        );
-        if (separatorRenderObject != null) {
-          final separatorExtent =
-              (separatorRenderObject.parentData as ListViewParentData).extent!;
-
-          if (index >= minIndex) {
-            _addToAllChildren(separatorRenderObject);
-          }
-
-          currentPosition += separatorExtent;
-        }
-      }
-    }
+    var found = false;
+    node.visitChildren((child) {
+      found = found || _subtreeHasSelection(child);
+    });
+    return found;
   }
 
   /// Helper to get render object from element and attach it to this viewport.
@@ -1304,10 +1292,10 @@ class RenderListViewport extends RenderObject with ScrollableRenderObjectMixin {
 
   @override
   void visitChildren(RenderObjectVisitor visitor) {
-    // Use _allChildren so that tree walks (e.g. SelectionArea collecting
-    // selectables) can discover force-built items outside the viewport.
-    // Paint and hit-testing iterate _visibleChildren directly, so this
-    // does not affect rendering or pointer dispatch.
+    // Use _allChildren so that tree walks (e.g. selection registrars
+    // collecting selectables) can discover cache-extent items outside the
+    // viewport. Paint and hit-testing iterate _visibleChildren directly, so
+    // this does not affect rendering or pointer dispatch.
     for (final child in _allChildren) {
       visitor(child.renderObject);
     }

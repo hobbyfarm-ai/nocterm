@@ -52,6 +52,29 @@ class MouseTracker {
   /// The set of mouse buttons currently held down.
   final Set<MouseButton> _pressedButtons = {};
 
+  MouseTrackerAnnotation? _capturedAnnotation;
+
+  /// Routes all mouse events to [annotation] until [releaseCapture],
+  /// bypassing hit testing and enter/exit dispatch.
+  ///
+  /// The terminal equivalent of pointer capture: a drag in progress owns
+  /// the pointer, so leaving the annotated region neither ends the drag
+  /// nor stops event delivery.
+  void capture(MouseTrackerAnnotation annotation) {
+    _capturedAnnotation = annotation;
+  }
+
+  /// Ends a [capture], restoring hit-tested dispatch.
+  void releaseCapture() {
+    _capturedAnnotation = null;
+  }
+
+  /// Whether a live capture is routing all events to a single annotation.
+  /// While true, [updateAnnotations] ignores hit-test results entirely, so
+  /// callers can skip hit testing.
+  bool get hasActiveCapture =>
+      _capturedAnnotation != null && _capturedAnnotation!.validForMouseTracker;
+
   /// Update the hovered annotations based on hit test results and dispatch events.
   void updateAnnotations(
     MouseHitTestResult hitTestResult,
@@ -59,6 +82,15 @@ class MouseTracker {
   ) {
     _updatePressedButtons(event);
     final effectiveEvent = _eventWithButtons(event);
+
+    final captured = _capturedAnnotation;
+    if (captured != null) {
+      if (captured.validForMouseTracker) {
+        captured.onHover?.call(effectiveEvent);
+        return;
+      }
+      _capturedAnnotation = null;
+    }
 
     // Collect all annotations from the hit test result
     final Set<MouseTrackerAnnotation> newAnnotations = {};

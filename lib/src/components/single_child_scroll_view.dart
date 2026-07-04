@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:nocterm/nocterm.dart';
 import 'package:nocterm/src/framework/terminal_canvas.dart';
+
 import '../rendering/scrollable_render_object.dart';
 
 /// A box in which a single widget can be scrolled.
@@ -49,6 +50,7 @@ class SingleChildScrollView extends StatefulComponent {
 
 class _SingleChildScrollViewState extends State<SingleChildScrollView> {
   ScrollController? _controller;
+  ScrollableSelectionContainerDelegate? _selectionDelegate;
 
   ScrollController get _effectiveController =>
       component.controller ?? _controller!;
@@ -77,6 +79,7 @@ class _SingleChildScrollViewState extends State<SingleChildScrollView> {
 
   @override
   void dispose() {
+    _selectionDelegate?.dispose();
     _controller?.dispose();
     super.dispose();
   }
@@ -141,6 +144,19 @@ class _SingleChildScrollViewState extends State<SingleChildScrollView> {
       controller: _effectiveController,
       child: child,
     );
+
+    final registrar = SelectionRegistrarScope.maybeOf(context);
+    if (registrar != null) {
+      final delegate = _selectionDelegate ??=
+          ScrollableSelectionContainerDelegate(
+              controller: _effectiveController);
+      delegate.controller = _effectiveController;
+      viewport = SelectionContainer(
+        registrar: registrar,
+        delegate: delegate,
+        child: viewport,
+      );
+    }
 
     // Wrap with Focusable for keyboard scrolling if enabled
     if (component.keyboardScrollable) {

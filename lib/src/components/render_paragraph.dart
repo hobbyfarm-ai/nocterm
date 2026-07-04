@@ -3,13 +3,13 @@ import 'package:nocterm/nocterm.dart' hide TextAlign;
 import 'package:nocterm/src/framework/terminal_canvas.dart';
 
 import '../text/text_layout_engine.dart';
-import '../utils/unicode_width.dart';
 export '../text/text_layout_engine.dart' show TextOverflow, TextAlign;
 
 /// Render object for displaying rich text (text with multiple styles).
 ///
 /// This is similar to RenderText but supports TextSpan with mixed styles.
-class RenderParagraph extends RenderObject with Selectable {
+class RenderParagraph extends RenderObject
+    with Selectable, SelectionRegistrant, TextSelectable {
   RenderParagraph({
     required InlineSpan text,
     TextAlign textAlign = TextAlign.left,
@@ -28,6 +28,7 @@ class RenderParagraph extends RenderObject with Selectable {
     if (_text == value) return;
     _text = value;
     _cachedSegments = null;
+    _cachedPlainText = null;
     markNeedsLayout();
   }
 
@@ -66,6 +67,10 @@ class RenderParagraph extends RenderObject with Selectable {
   // Cache the styled segments to avoid recomputing them
   List<StyledTextSegment>? _cachedSegments;
 
+  // Cache the flattened text: toPlainText walks the whole span tree, and
+  // selection paths read this once per event and once per painted line.
+  String? _cachedPlainText;
+
   // Store the layout result and the styled lines
   TextLayoutResult? _layoutResult;
   List<List<StyledTextSegment>>? _styledLines;
@@ -84,9 +89,6 @@ class RenderParagraph extends RenderObject with Selectable {
         ? constraints.maxWidth.toInt()
         : double.maxFinite.toInt();
 
-    // Get the plain text for layout calculation
-    final plainText = _text.toPlainText();
-
     final config = TextLayoutConfig(
       softWrap: _softWrap,
       overflow: _overflow,
@@ -104,6 +106,8 @@ class RenderParagraph extends RenderObject with Selectable {
       _layoutResult!.actualWidth.toDouble(),
       _layoutResult!.actualHeight.toDouble(),
     ));
+
+    didLayoutSelectableText();
   }
 
   /// Maps styled segments to the laid out lines.
@@ -181,7 +185,7 @@ class RenderParagraph extends RenderObject with Selectable {
     return styledLines;
   }
 
-  String get plainText => _text.toPlainText();
+  String get plainText => _cachedPlainText ??= _text.toPlainText();
 
   @override
   String get selectableText => plainText;
@@ -253,13 +257,12 @@ class RenderParagraph extends RenderObject with Selectable {
     String lineText,
     int lineIndex,
   ) {
-    final lines = _layoutResult?.lines ?? const [];
     final text = selectableText;
     final selStart = selectionStart;
     final selEnd = selectionEnd;
 
     // Calculate line start offset in the full text
-    final lineStartOffset = Selectable.lineStartOffsets(text, lines)[lineIndex];
+    final lineStartOffset = selectableLineStarts[lineIndex];
     final lineEndOffset = lineStartOffset + lineText.length;
 
     // Normalize selection range

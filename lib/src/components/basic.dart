@@ -48,6 +48,7 @@ class Text extends SingleChildRenderObjectComponent {
 
   @override
   RenderObject createRenderObject(BuildContext context) {
+    final selectionStyle = SelectionStyle.maybeOf(context);
     return RenderText(
       text: data,
       style: style,
@@ -55,18 +56,25 @@ class Text extends SingleChildRenderObjectComponent {
       overflow: overflow,
       textAlign: textAlign,
       maxLines: maxLines,
-    );
+    )
+      ..registrar = SelectionRegistrarScope.maybeOf(context)
+      ..selection = selectionStyle?.selection
+      ..onSelection = selectionStyle?.onSelection;
   }
 
   @override
   void updateRenderObject(BuildContext context, RenderText renderObject) {
+    final selectionStyle = SelectionStyle.maybeOf(context);
     renderObject
       ..text = data
       ..style = style
       ..softWrap = softWrap
       ..overflow = overflow
       ..textAlign = textAlign
-      ..maxLines = maxLines;
+      ..maxLines = maxLines
+      ..registrar = SelectionRegistrarScope.maybeOf(context)
+      ..selection = selectionStyle?.selection
+      ..onSelection = selectionStyle?.onSelection;
   }
 }
 

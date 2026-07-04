@@ -19,6 +19,12 @@ class SocketBackend implements TerminalBackend {
       : _size = initialSize ?? const Size(80, 24);
 
   @override
+  bool get isWriteInFlight => false;
+
+  @override
+  Stream<void>? get writeDrainedStream => null;
+
+  @override
   void writeRaw(String data) {
     if (!_disposed) {
       _socket.write(data);

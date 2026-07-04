@@ -21,6 +21,7 @@ class TerminalBinding extends NoctermBinding
   TerminalBinding(this.terminal) {
     _instance = this;
     _initializePipelineOwner();
+    _startWriteDrainHandling();
   }
 
   static TerminalBinding? _instance;
@@ -59,6 +60,11 @@ class TerminalBinding extends NoctermBinding
 
   /// Previous frame's buffer for differential rendering.
   buf.Buffer? _previousBuffer;
+
+  /// Set when a frame was skipped because the backend was still draining a
+  /// previous frame; the drain listener schedules the catch-up frame.
+  bool _framePendingDrain = false;
+  StreamSubscription? _writeDrainSubscription;
 
   // Event-driven loop support
   final _eventLoopController = StreamController<void>.broadcast();
@@ -142,6 +148,16 @@ class TerminalBinding extends NoctermBinding
   void _initializePipelineOwner() {
     _pipelineOwner = PipelineOwner();
     _pipelineOwner!.onNeedsVisualUpdate = scheduleFrame;
+  }
+
+  void _startWriteDrainHandling() {
+    final drainedStream = terminal.backend.writeDrainedStream;
+    if (drainedStream == null) return;
+    _writeDrainSubscription = drainedStream.listen((_) {
+      if (!_framePendingDrain) return;
+      _framePendingDrain = false;
+      scheduleFrame();
+    });
   }
 
   /// Stream of keyboard input events (raw strings)
@@ -270,7 +286,8 @@ class TerminalBinding extends NoctermBinding
 
       // Batch consecutive printable character events into a synthetic paste
       // This handles terminals (like Warp) that don't use bracketed paste for drag-drop
-      final batchedEvents = _batchCharacterEvents(events);
+      final batchedEvents =
+          _batchCharacterEvents(_coalesceMouseMotionEvents(events));
 
       // Process all batched events
       for (final event in batchedEvents) {
@@ -341,11 +358,18 @@ class TerminalBinding extends NoctermBinding
   /// deferred ESC. Commits the lone Escape event and routes it.
   void _flushLoneEscape() {
     _loneEscapeTimer = null;
+
     // A chunk-final ESC held by the OSC scanner turned out to be a real
-    // Escape keypress: move it into the parser so it can commit it.
-    if (_oscScanner.hasPendingEsc) {
-      _inputParser.addBytes(_oscScanner.takePendingEsc());
+    // Escape keypress. Deliver it through the raw-input path first, exactly
+    // as live bytes are: a consumer reading raw bytes must see the byte here, not only as a parsed
+    // KeyboardEvent it never observes.
+    final deferred = _oscScanner.takePendingEsc();
+    if (deferred.isNotEmpty && _dispatchRawInput(deferred)) {
+      if (buildOwner.hasDirtyElements) scheduleFrame();
+      return;
     }
+    if (deferred.isNotEmpty) _inputParser.addBytes(deferred);
+
     final event = _inputParser.flushLoneEscape();
     if (event == null) return;
     _keyboardEventController.add(event);
@@ -416,6 +440,36 @@ class TerminalBinding extends NoctermBinding
         // Invalid size, ignore
       }
     }
+  }
+
+  /// Collapse each run of consecutive mouse motion reports into its last
+  /// event.
+  ///
+  /// Terminals stream motion at cell granularity without coalescing, and
+  /// routing each report costs a full hover/selection pass downstream. Only
+  /// the final position of a run matters; presses, releases, and wheel ticks
+  /// ([MouseEvent.isMotion] is false for all of them) always pass through
+  /// and bound the runs, so no ordering is lost. When input processing falls
+  /// behind, stdin reads return bigger chunks, so coalescing removes more
+  /// events exactly when the backlog is worst.
+  List<InputEvent> _coalesceMouseMotionEvents(List<InputEvent> events) {
+    if (events.length <= 1) return events;
+
+    final result = <InputEvent>[];
+    for (final event in events) {
+      if (event is MouseInputEvent && event.event.isMotion) {
+        final last = result.isEmpty ? null : result.last;
+        if (last is MouseInputEvent &&
+            last.event.isMotion &&
+            last.event.button == event.event.button &&
+            last.event.pressed == event.event.pressed) {
+          result.last = event;
+          continue;
+        }
+      }
+      result.add(event);
+    }
+    return result;
   }
 
   /// Batch consecutive printable character events into a single PasteInputEvent.
@@ -534,6 +588,7 @@ class TerminalBinding extends NoctermBinding
     _inputSubscription?.cancel();
     _resizeSubscription?.cancel();
     _shutdownSubscription?.cancel();
+    _writeDrainSubscription?.cancel();
 
     // Close all controllers
     try {
@@ -697,6 +752,7 @@ class TerminalBinding extends NoctermBinding
     _loneEscapeTimer?.cancel();
     _inputSubscription?.cancel();
     _resizeSubscription?.cancel();
+    _writeDrainSubscription?.cancel();
 
     // Don't cancel shutdown subscription here - let it stay active
     // so it can handle additional signals if needed
@@ -1241,6 +1297,15 @@ class TerminalBinding extends NoctermBinding
   /// The actual frame drawing logic, registered as a persistent callback.
   void _drawFrameCallback(Duration timeStamp) {
     if (rootElement == null) return;
+
+    // The backend is still draining a previous frame to the terminal.
+    // Rendering now would stack payloads behind the stall, so skip the
+    // frame entirely — dirty elements stay dirty and the drain listener
+    // schedules one catch-up frame that coalesces everything.
+    if (terminal.backend.isWriteInFlight) {
+      _framePendingDrain = true;
+      return;
+    }
 
     // Check if we need to do visual work BEFORE the build phase
     // We check this early to avoid unnecessary work

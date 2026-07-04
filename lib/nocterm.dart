@@ -105,6 +105,10 @@ export 'src/components/image.dart';
 export 'src/image/image_cleanup.dart' show ImageProtocol;
 
 // Text Selection
-export 'src/components/selection_area.dart';
-export 'src/components/selection_scope.dart';
-export 'src/components/selectable.dart';
+export 'src/selection/scrollable_selection_delegate.dart';
+export 'src/selection/selection.dart';
+export 'src/selection/selection_area.dart';
+export 'src/selection/selection_container.dart';
+export 'src/selection/selection_container_delegate.dart';
+export 'src/selection/self_scrolling_selectable.dart';
+export 'src/selection/text_selectable.dart';

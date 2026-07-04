@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 import 'package:nocterm/src/size.dart';
 
+import 'fd_writer.dart';
 import 'terminal_backend.dart';
 import 'win32_ansi_stdin.dart';
 
@@ -65,9 +66,19 @@ class StdioBackend implements TerminalBackend {
   Size? _lastKnownSize;
   bool _disposed = false;
   Win32AnsiStdin? _win32Stdin;
+  FdWriter? _writer;
 
   StdioBackend() {
     _initializeSignalHandling();
+    // Route stdout writes through a writer isolate so a terminal that stops
+    // draining its pty blocks that isolate instead of the main event loop.
+    // Until the isolate is up (or on Windows, where the libc write path
+    // doesn't apply), writes fall back to the synchronous path.
+    if (_libcWrite != null) {
+      final writer = FdWriter();
+      _writer = writer;
+      unawaited(writer.start());
+    }
   }
 
   void _initializeSignalHandling() {
@@ -137,13 +148,25 @@ class StdioBackend implements TerminalBackend {
   }
 
   @override
+  bool get isWriteInFlight => _writer?.isWriteInFlight ?? false;
+
+  @override
+  Stream<void>? get writeDrainedStream => _writer?.drained;
+
+  @override
   void writeRawBytes(Uint8List bytes) {
+    if (bytes.isEmpty) return;
+    final writer = _writer;
+    if (writer != null && writer.submit(bytes)) return;
+    _writeRawBytesSync(bytes);
+  }
+
+  void _writeRawBytesSync(Uint8List bytes) {
     final write = _libcWrite;
     if (write == null) {
       stdout.write(utf8.decode(bytes, allowMalformed: true));
       return;
     }
-    if (bytes.isEmpty) return;
     final buf = malloc.allocate<Uint8>(bytes.length);
     try {
       buf.asTypedList(bytes.length).setAll(0, bytes);
@@ -234,19 +257,23 @@ class StdioBackend implements TerminalBackend {
 
   @override
   void requestExit([int exitCode = 0]) {
-    // Flush stdout before exiting to ensure all terminal cleanup escape
-    // sequences (disable mouse tracking, leave alternate screen, show cursor,
-    // etc.) are actually written to the terminal. Without this, macOS terminals
-    // can be left in a bad state (e.g., echo mode off, stuck in alt screen).
-    // See: https://github.com/Norbert515/nocterm/issues/57
-    Future.wait<void>([stdout.flush(), stderr.flush()])
-        .then((_) => exit(exitCode))
-        .catchError((_) => exit(exitCode));
+    // Drain the writer isolate, then flush stdout, before exiting — the
+    // terminal cleanup escape sequences (disable mouse tracking, leave
+    // alternate screen, show cursor, etc.) are queued behind any in-flight
+    // frame and must actually reach the terminal. Without this, macOS
+    // terminals can be left in a bad state (e.g., echo mode off, stuck in
+    // alt screen). The drain is time-boxed so a wedged terminal can't hold
+    // the process hostage. See: https://github.com/Norbert515/nocterm/issues/57
+    Future(() async {
+      await _writer?.waitForDrain(const Duration(seconds: 1));
+      await Future.wait<void>([stdout.flush(), stderr.flush()]);
+    }).then((_) => exit(exitCode)).catchError((_) => exit(exitCode));
   }
 
   @override
   void dispose() {
     _disposed = true;
+    _writer?.dispose();
     _windowsResizeTimer?.cancel();
     _sigwinchSubscription?.cancel();
     _sigintSubscription?.cancel();

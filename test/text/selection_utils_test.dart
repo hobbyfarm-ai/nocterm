@@ -11,7 +11,7 @@ void main() {
       final offsets = selection_utils.lineStartOffsets(text, lines);
 
       expect(offsets, equals([0, 2, 3]));
-      expect(Selectable.lineStartOffsets(text, lines), equals(offsets));
+      expect(selection_utils.lineStartOffsets(text, lines), equals(offsets));
     });
 
     test('getCharacterIndexAtLocalPosition snaps by half-grapheme', () {
