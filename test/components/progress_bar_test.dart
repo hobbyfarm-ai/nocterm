@@ -283,48 +283,60 @@ void main() {
       );
     });
 
-    test('visual development - indeterminate progress',
-        skip: 'Known issue: Indeterminate progress animation timing', () async {
+    test('indeterminate pulse slides as a pure rotation with no snap', () {
+      // The band must advance exactly one cell per animation step and wrap
+      // seamlessly.
+      for (final width in [3, 4, 5, 12, 20, 40]) {
+        // Sample the middle of each cell so floating-point rounding never
+        // lands on a cell boundary.
+        List<bool> at(int lead) => indeterminatePulse(width, lead + 0.5);
+
+        final litCount = at(0).where((lit) => lit).length;
+        expect(litCount, greaterThan(0));
+
+        for (int lead = 0; lead < width; lead++) {
+          final current = at(lead);
+          final previous = at((lead - 1 + width) % width);
+
+          expect(current.where((lit) => lit).length, litCount,
+              reason: 'band size changed at lead=$lead (width=$width)');
+
+          final rotatedPrevious = [
+            for (int x = 0; x < width; x++) previous[(x - 1 + width) % width]
+          ];
+          expect(current, rotatedPrevious,
+              reason:
+                  'lead=$lead is not previous rotated by one (width=$width)');
+        }
+      }
+    });
+
+    test('indeterminate bar self-animates over elapsed time', () async {
       await testNocterm(
-        'indeterminate progress animation',
+        'indeterminate self-animation',
         (tester) async {
-          print('Indeterminate progress (animated):');
           await tester.pumpComponent(
-            Column(
-              children: [
-                Text('Indeterminate progress bar:'),
-                SizedBox(
-                  width: 40,
-                  height: 1,
-                  child: ProgressBar(
-                    indeterminate: true,
-                    valueColor: Colors.cyan,
-                    backgroundColor: Colors.grey,
-                  ),
-                ),
-                SizedBox(height: 1),
-                SizedBox(
-                  width: 40,
-                  height: 3,
-                  child: ProgressBar(
-                    indeterminate: true,
-                    borderStyle: ProgressBarBorderStyle.rounded,
-                    valueColor: Colors.magenta,
-                    backgroundColor: Colors.grey,
-                  ),
-                ),
-              ],
+            SizedBox(
+              width: 40,
+              height: 1,
+              child: ProgressBar(
+                indeterminate: true,
+                valueColor: Colors.cyan,
+                backgroundColor: Colors.grey,
+              ),
             ),
           );
 
-          // Show a few animation frames
-          for (int i = 0; i < 5; i++) {
-            await Future.delayed(Duration(milliseconds: 100));
-            print('\nAnimation frame ${i + 1}:');
-            await tester.pump();
+          // No external state changes the tree — only wall-clock time passes.
+          final frames = <String>{tester.terminalState.getText()};
+          for (int i = 0; i < 4; i++) {
+            await tester.pump(const Duration(milliseconds: 120));
+            frames.add(tester.terminalState.getText());
           }
+
+          expect(frames.length, greaterThan(1),
+              reason: 'indeterminate bar did not animate on its own');
         },
-        debugPrintAfterPump: true,
       );
     });
 

@@ -1,6 +1,23 @@
 import 'dart:math' as math;
+
+import 'package:meta/meta.dart';
 import 'package:nocterm/nocterm.dart';
 import 'package:nocterm/src/framework/terminal_canvas.dart';
+
+/// Computes which cells of an indeterminate progress bar of [width] cells are
+/// lit when the band's leading edge sits at [position].
+@visibleForTesting
+List<bool> indeterminatePulse(int width, double position) {
+  if (width <= 0) return const <bool>[];
+  final pulseWidth = math.max(1, (width * 0.3).floor());
+  final lead = position.floor() % width;
+  bool inBand(int distance) => distance >= 0 && distance <= pulseWidth;
+  return List<bool>.generate(
+    width,
+    (x) => inBand(lead - x) || inBand(lead + width - x),
+    growable: false,
+  );
+}
 
 enum ProgressBarBorderStyle {
   single,
@@ -12,7 +29,7 @@ enum ProgressBarBorderStyle {
   doubleVertical,
 }
 
-class ProgressBar extends StatelessComponent {
+class ProgressBar extends StatefulComponent {
   const ProgressBar({
     super.key,
     this.value,
@@ -51,19 +68,70 @@ class ProgressBar extends StatelessComponent {
   final bool indeterminate;
 
   @override
+  State<ProgressBar> createState() => _ProgressBarState();
+}
+
+class _ProgressBarState extends State<ProgressBar>
+    with SingleTickerProviderStateMixin {
+  /// How fast the indeterminate band slides, in cells per second.
+  static const _cellsPerSecond = 30.0;
+
+  Ticker? _ticker;
+  Duration _elapsed = Duration.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    if (component.indeterminate) {
+      _startTicker();
+    }
+  }
+
+  @override
+  void didUpdateComponent(ProgressBar oldComponent) {
+    super.didUpdateComponent(oldComponent);
+    if (component.indeterminate != oldComponent.indeterminate) {
+      if (component.indeterminate) {
+        _startTicker();
+      } else {
+        _ticker?.stop();
+        _elapsed = Duration.zero;
+      }
+    }
+  }
+
+  void _startTicker() {
+    (_ticker ??= createTicker((elapsed) {
+      setState(() => _elapsed = elapsed);
+    })).start();
+  }
+
+  @override
+  void dispose() {
+    _ticker?.dispose();
+    super.dispose();
+  }
+
+  @override
   Component build(BuildContext context) {
     final theme = TuiTheme.of(context);
+    final position =
+        _elapsed.inMicroseconds /
+        Duration.microsecondsPerSecond *
+        _cellsPerSecond;
+
     return _RawProgressBar(
-      value: value,
-      minHeight: minHeight,
-      backgroundColor: backgroundColor ?? theme.outline,
-      valueColor: valueColor ?? theme.primary,
-      borderStyle: borderStyle,
-      fillCharacter: fillCharacter,
-      emptyCharacter: emptyCharacter,
-      showPercentage: showPercentage,
-      label: label,
-      indeterminate: indeterminate,
+      value: component.value,
+      minHeight: component.minHeight,
+      backgroundColor: component.backgroundColor ?? theme.outline,
+      valueColor: component.valueColor ?? theme.primary,
+      borderStyle: component.borderStyle,
+      fillCharacter: component.fillCharacter,
+      emptyCharacter: component.emptyCharacter,
+      showPercentage: component.showPercentage,
+      label: component.label,
+      indeterminate: component.indeterminate,
+      indeterminatePosition: position,
     );
   }
 }
@@ -80,6 +148,7 @@ class _RawProgressBar extends SingleChildRenderObjectComponent {
     required this.showPercentage,
     required this.label,
     required this.indeterminate,
+    required this.indeterminatePosition,
   });
 
   final double? value;
@@ -92,6 +161,7 @@ class _RawProgressBar extends SingleChildRenderObjectComponent {
   final bool showPercentage;
   final String? label;
   final bool indeterminate;
+  final double indeterminatePosition;
 
   @override
   RenderObject createRenderObject(BuildContext context) {
@@ -106,12 +176,15 @@ class _RawProgressBar extends SingleChildRenderObjectComponent {
       showPercentage: showPercentage,
       label: label,
       indeterminate: indeterminate,
+      indeterminatePosition: indeterminatePosition,
     );
   }
 
   @override
   void updateRenderObject(
-      BuildContext context, RenderProgressBar renderObject) {
+    BuildContext context,
+    RenderProgressBar renderObject,
+  ) {
     renderObject
       ..value = value
       ..minHeight = minHeight
@@ -122,7 +195,8 @@ class _RawProgressBar extends SingleChildRenderObjectComponent {
       ..emptyCharacter = emptyCharacter
       ..showPercentage = showPercentage
       ..label = label
-      ..indeterminate = indeterminate;
+      ..indeterminate = indeterminate
+      ..indeterminatePosition = indeterminatePosition;
   }
 }
 
@@ -138,16 +212,18 @@ class RenderProgressBar extends RenderObject {
     bool showPercentage = false,
     String? label,
     bool indeterminate = false,
-  })  : _value = value,
-        _minHeight = minHeight,
-        _backgroundColor = backgroundColor,
-        _valueColor = valueColor,
-        _borderStyle = borderStyle,
-        _fillCharacter = fillCharacter,
-        _emptyCharacter = emptyCharacter,
-        _showPercentage = showPercentage,
-        _label = label,
-        _indeterminate = indeterminate;
+    double indeterminatePosition = 0.0,
+  }) : _value = value,
+       _minHeight = minHeight,
+       _backgroundColor = backgroundColor,
+       _valueColor = valueColor,
+       _borderStyle = borderStyle,
+       _fillCharacter = fillCharacter,
+       _emptyCharacter = emptyCharacter,
+       _showPercentage = showPercentage,
+       _label = label,
+       _indeterminate = indeterminate,
+       _indeterminatePosition = indeterminatePosition;
 
   double? _value;
   double _minHeight;
@@ -159,9 +235,7 @@ class RenderProgressBar extends RenderObject {
   bool _showPercentage;
   String? _label;
   bool _indeterminate;
-
-  double _animationValue = 0.0;
-  int _animationFrame = 0;
+  double _indeterminatePosition;
 
   double? get value => _value;
   set value(double? newValue) {
@@ -243,16 +317,21 @@ class RenderProgressBar extends RenderObject {
     }
   }
 
+  double get indeterminatePosition => _indeterminatePosition;
+  set indeterminatePosition(double newValue) {
+    if (_indeterminatePosition != newValue) {
+      _indeterminatePosition = newValue;
+      if (_indeterminate) markNeedsPaint();
+    }
+  }
+
   @override
   bool hitTestSelf(Offset position) => true;
 
   @override
   void performLayout() {
     final desiredHeight = minHeight.clamp(1.0, constraints.maxHeight);
-    size = constraints.constrain(Size(
-      constraints.maxWidth,
-      desiredHeight,
-    ));
+    size = constraints.constrain(Size(constraints.maxWidth, desiredHeight));
   }
 
   @override
@@ -275,17 +354,24 @@ class RenderProgressBar extends RenderObject {
 
       // Top border
       if (barHeight > 1) {
-        canvas.drawText(offset, borderChars['topLeft']!,
-            style: TextStyle(color: valueColor));
+        canvas.drawText(
+          offset,
+          borderChars['topLeft']!,
+          style: TextStyle(color: valueColor),
+        );
         for (int x = 1; x < barWidth - 1; x++) {
           canvas.drawText(
-              offset + Offset(x.toDouble(), 0), borderChars['horizontal']!,
-              style: TextStyle(color: valueColor));
+            offset + Offset(x.toDouble(), 0),
+            borderChars['horizontal']!,
+            style: TextStyle(color: valueColor),
+          );
         }
         if (barWidth > 1) {
-          canvas.drawText(offset + Offset((barWidth - 1).toDouble(), 0),
-              borderChars['topRight']!,
-              style: TextStyle(color: valueColor));
+          canvas.drawText(
+            offset + Offset((barWidth - 1).toDouble(), 0),
+            borderChars['topRight']!,
+            style: TextStyle(color: valueColor),
+          );
         }
       }
 
@@ -293,46 +379,60 @@ class RenderProgressBar extends RenderObject {
       if (barHeight > 2) {
         for (int y = 1; y < barHeight - 1; y++) {
           canvas.drawText(
-              offset + Offset(0, y.toDouble()), borderChars['vertical']!,
-              style: TextStyle(color: valueColor));
+            offset + Offset(0, y.toDouble()),
+            borderChars['vertical']!,
+            style: TextStyle(color: valueColor),
+          );
           if (barWidth > 1) {
             canvas.drawText(
-                offset + Offset((barWidth - 1).toDouble(), y.toDouble()),
-                borderChars['vertical']!,
-                style: TextStyle(color: valueColor));
+              offset + Offset((barWidth - 1).toDouble(), y.toDouble()),
+              borderChars['vertical']!,
+              style: TextStyle(color: valueColor),
+            );
           }
         }
 
         // Bottom border
-        canvas.drawText(offset + Offset(0, (barHeight - 1).toDouble()),
-            borderChars['bottomLeft']!,
-            style: TextStyle(color: valueColor));
+        canvas.drawText(
+          offset + Offset(0, (barHeight - 1).toDouble()),
+          borderChars['bottomLeft']!,
+          style: TextStyle(color: valueColor),
+        );
         for (int x = 1; x < barWidth - 1; x++) {
           canvas.drawText(
-              offset + Offset(x.toDouble(), (barHeight - 1).toDouble()),
-              borderChars['horizontal']!,
-              style: TextStyle(color: valueColor));
+            offset + Offset(x.toDouble(), (barHeight - 1).toDouble()),
+            borderChars['horizontal']!,
+            style: TextStyle(color: valueColor),
+          );
         }
         if (barWidth > 1) {
           canvas.drawText(
-              offset +
-                  Offset((barWidth - 1).toDouble(), (barHeight - 1).toDouble()),
-              borderChars['bottomRight']!,
-              style: TextStyle(color: valueColor));
+            offset +
+                Offset((barWidth - 1).toDouble(), (barHeight - 1).toDouble()),
+            borderChars['bottomRight']!,
+            style: TextStyle(color: valueColor),
+          );
         }
       } else if (barHeight == 2) {
         // Simple two-line border
-        canvas.drawText(offset + Offset(0, 1), borderChars['bottomLeft']!,
-            style: TextStyle(color: valueColor));
+        canvas.drawText(
+          offset + Offset(0, 1),
+          borderChars['bottomLeft']!,
+          style: TextStyle(color: valueColor),
+        );
         for (int x = 1; x < barWidth - 1; x++) {
           canvas.drawText(
-              offset + Offset(x.toDouble(), 1), borderChars['horizontal']!,
-              style: TextStyle(color: valueColor));
+            offset + Offset(x.toDouble(), 1),
+            borderChars['horizontal']!,
+            style: TextStyle(color: valueColor),
+          );
         }
         if (barWidth > 1) {
-          canvas.drawText(offset + Offset((barWidth - 1).toDouble(), 1),
-              borderChars['bottomRight']!,
-              style: TextStyle(color: valueColor));
+          canvas.drawText(
+            offset + Offset((barWidth - 1).toDouble(), 1),
+            borderChars['bottomRight']!,
+            style: TextStyle(color: valueColor),
+          );
         }
       }
 
@@ -353,21 +453,12 @@ class RenderProgressBar extends RenderObject {
 
     // Draw progress bar content
     if (indeterminate) {
-      // Animated indeterminate progress
-      _animationFrame = (_animationFrame + 1) % (contentWidth * 2);
-      _animationValue = _animationFrame / (contentWidth * 2);
-
-      final pulseWidth = math.max(1, (contentWidth * 0.3).floor());
-      final pulsePosition = (_animationValue * contentWidth * 2).floor();
+      final pulse = indeterminatePulse(contentWidth, _indeterminatePosition);
 
       for (int y = contentStartY; y < contentEndY; y++) {
         for (int x = contentStartX; x < contentEndX; x++) {
           final relativeX = x - contentStartX;
-          final isPulse = (relativeX >= pulsePosition - pulseWidth &&
-                  relativeX <= pulsePosition) ||
-              (pulsePosition > contentWidth &&
-                  relativeX >= pulsePosition - contentWidth - pulseWidth &&
-                  relativeX <= pulsePosition - contentWidth);
+          final isPulse = pulse[relativeX];
 
           canvas.drawText(
             offset + Offset(x.toDouble(), y.toDouble()),
