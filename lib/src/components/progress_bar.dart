@@ -77,7 +77,6 @@ class _ProgressBarState extends State<ProgressBar>
   static const _cellsPerSecond = 30.0;
 
   Ticker? _ticker;
-  Duration _elapsed = Duration.zero;
 
   @override
   void initState() {
@@ -95,15 +94,14 @@ class _ProgressBarState extends State<ProgressBar>
         _startTicker();
       } else {
         _ticker?.stop();
-        _elapsed = Duration.zero;
       }
     }
   }
 
+  /// Drives a repaint each frame; the band's phase comes from the absolute
+  /// frame clock in [build], not the tick's elapsed time.
   void _startTicker() {
-    (_ticker ??= createTicker((elapsed) {
-      setState(() => _elapsed = elapsed);
-    })).start();
+    (_ticker ??= createTicker((_) => setState(() {}))).start();
   }
 
   @override
@@ -115,10 +113,13 @@ class _ProgressBarState extends State<ProgressBar>
   @override
   Component build(BuildContext context) {
     final theme = TuiTheme.of(context);
+    // Anchor the band's phase to the absolute frame clock so a rebuild that
+    // recreates this State (and restarts the ticker) doesn't restart the
+    // slide from the beginning.
     final position =
-        _elapsed.inMicroseconds /
-        Duration.microsecondsPerSecond *
-        _cellsPerSecond;
+        SchedulerBinding.instance.currentSystemFrameTimeStamp.inMicroseconds /
+            Duration.microsecondsPerSecond *
+            _cellsPerSecond;
 
     return _RawProgressBar(
       value: component.value,
@@ -213,17 +214,17 @@ class RenderProgressBar extends RenderObject {
     String? label,
     bool indeterminate = false,
     double indeterminatePosition = 0.0,
-  }) : _value = value,
-       _minHeight = minHeight,
-       _backgroundColor = backgroundColor,
-       _valueColor = valueColor,
-       _borderStyle = borderStyle,
-       _fillCharacter = fillCharacter,
-       _emptyCharacter = emptyCharacter,
-       _showPercentage = showPercentage,
-       _label = label,
-       _indeterminate = indeterminate,
-       _indeterminatePosition = indeterminatePosition;
+  })  : _value = value,
+        _minHeight = minHeight,
+        _backgroundColor = backgroundColor,
+        _valueColor = valueColor,
+        _borderStyle = borderStyle,
+        _fillCharacter = fillCharacter,
+        _emptyCharacter = emptyCharacter,
+        _showPercentage = showPercentage,
+        _label = label,
+        _indeterminate = indeterminate,
+        _indeterminatePosition = indeterminatePosition;
 
   double? _value;
   double _minHeight;

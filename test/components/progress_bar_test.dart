@@ -340,6 +340,46 @@ void main() {
       );
     });
 
+    test('indeterminate animation survives a rebuild that recreates its State',
+        () async {
+      await testNocterm(
+        'indeterminate rebuild keeps phase',
+        (tester) async {
+          // A differing key fails canUpdate, so the old State is disposed and a
+          // fresh one is created — the same thing that happens when an item in
+          // a list rebuilds and loses its State.
+          ProgressBar bar(String key) => ProgressBar(
+                key: ValueKey(key),
+                indeterminate: true,
+                valueColor: Colors.cyan,
+                backgroundColor: Colors.grey,
+              );
+
+          await tester.pumpComponent(
+            SizedBox(width: 40, height: 1, child: bar('a')),
+          );
+
+          // Let the band slide well past its starting position.
+          for (int i = 0; i < 3; i++) {
+            await tester.pump(const Duration(milliseconds: 120));
+          }
+          final beforeRebuild = tester.terminalState.getText();
+
+          // Rebuild with a new key: State (and the ticker) restart, but almost
+          // no wall-clock time passes.
+          await tester.pumpComponent(
+            SizedBox(width: 40, height: 1, child: bar('b')),
+          );
+          final afterRebuild = tester.terminalState.getText();
+
+          // The band must sit where the absolute clock says, not snap back to
+          // the start as it would if the phase were ticker-relative.
+          expect(afterRebuild, equals(beforeRebuild),
+              reason: 'recreating the State restarted the animation');
+        },
+      );
+    });
+
     test('renders correctly', () async {
       await testNocterm(
         'correct rendering',
