@@ -1173,7 +1173,9 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
   set placeholder(String? value) {
     if (_placeholder != value) {
       _placeholder = value;
-      markNeedsPaint();
+      if (_text.isEmpty) {
+        markNeedsLayout();
+      }
     }
   }
 
