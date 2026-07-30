@@ -229,8 +229,15 @@ void main() {
       harness.flush();
 
       harness.startSelection(const Offset(2, 1));
-      final result = harness.moveEnd(const Offset(2, 6));
+      // The first in-band tick seeds the auto-scroll clock and moves
+      // nothing; its pending report is what keeps SelectionArea
+      // re-dispatching the edge each frame.
+      var result = harness.moveEnd(const Offset(2, 6));
+      expect(result, SelectionResult.pending);
+      expect(harness.controller.offset, 0);
 
+      // The re-dispatched tick owns real time and scrolls.
+      result = harness.moveEnd(const Offset(2, 6));
       expect(result, SelectionResult.pending);
       expect(harness.controller.offset, greaterThan(0));
     });
@@ -316,7 +323,10 @@ void main() {
       harness.flush();
 
       harness.startSelection(const Offset(0, 0));
-      final result = harness.moveEnd(const Offset(2, 6));
+      // Seed tick, then a tick that owns time — see the auto-scroll test.
+      var result = harness.moveEnd(const Offset(2, 6));
+      expect(result, SelectionResult.pending);
+      result = harness.moveEnd(const Offset(2, 6));
 
       expect(result, SelectionResult.pending);
       expect(replacement.offset, greaterThan(0));
