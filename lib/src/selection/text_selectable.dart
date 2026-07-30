@@ -3,6 +3,7 @@ import 'package:meta/meta.dart';
 import '../framework/framework.dart';
 import '../framework/terminal_canvas.dart';
 import '../rectangle.dart';
+import '../rendering/reflow_anchorable.dart';
 import '../style.dart';
 import '../text/selection_utils.dart' as selection_utils;
 import '../text/text_layout_engine.dart';
@@ -15,7 +16,7 @@ import 'selection.dart';
 /// call [didLayoutSelectableText] at the end of `performLayout`, and use
 /// [paintTextWithSelection] (or [selectionStart]/[selectionEnd]) to paint
 /// the highlight.
-mixin TextSelectable on RenderObject, Selectable {
+mixin TextSelectable on RenderObject, Selectable implements ReflowAnchorable {
   /// The plain-text content that can be selected.
   String get selectableText;
 
@@ -255,9 +256,26 @@ mixin TextSelectable on RenderObject, Selectable {
   }
 
   /// Maps a local cell position to a character index in [selectableText].
+  @override
   int getCharacterIndexAtLocalPosition(Offset localPos) {
     return selection_utils.getCharacterIndexAtLocalPosition(
       localPos: localPos,
+      text: selectableText,
+      lines: _lines,
+      lineStarts: selectableLineStarts,
+    );
+  }
+
+  /// Maps a character index in [selectableText] to its local cell position
+  /// (column, row) in the current layout, clamped to the content bounds.
+  ///
+  /// The inverse of [getCharacterIndexAtLocalPosition]. Character indexes
+  /// are stable across reflows while rows are not, which makes this the
+  /// read path for anyone holding a position through a layout change.
+  @override
+  Offset localPositionForCharacterIndex(int offset) {
+    return selection_utils.positionForOffset(
+      offset: offset.clamp(0, contentLength),
       text: selectableText,
       lines: _lines,
       lineStarts: selectableLineStarts,

@@ -78,9 +78,11 @@ export 'src/utils/escape_codes.dart';
 export 'src/utils/unicode_width.dart';
 
 // Performance and Debugging
+export 'src/foundation/constants.dart';
 export 'src/foundation/performance.dart';
 export 'src/foundation/nocterm_error.dart';
 export 'src/rendering/debug.dart';
+export 'src/rendering/reflow_anchorable.dart';
 export 'src/components/debug_overlay.dart';
 
 // Widgets

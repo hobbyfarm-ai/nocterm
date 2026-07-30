@@ -1,3 +1,4 @@
+import 'package:meta/meta.dart';
 import 'package:nocterm/nocterm.dart';
 
 /// Controls a scrollable widget.
@@ -14,6 +15,31 @@ class ScrollController extends ChangeNotifier {
   double _maxScrollExtent = 0.0;
   double _viewportDimension = 0.0;
   AxisDirection _axisDirection = AxisDirection.down;
+
+  /// Offsets this close to [maxScrollExtent] count as reading the tail when
+  /// deciding whether a cross-axis reflow should keep the view pinned to the
+  /// end of the content. One terminal cell.
+  static const double endReflowTolerance = 1.0;
+
+  /// Cross-axis extent reported by the last [updateMetrics] call, used to
+  /// detect reflows. Null until a viewport reports one.
+  double? _lastCrossAxisExtent;
+
+  /// Whether a reflow started while the view was reading the tail. Stays set
+  /// across [updateMetrics] calls until the offset settles on the end —
+  /// lazily-measured content revises its extent estimate over several layout
+  /// passes, and each revision moves the end the pin is chasing.
+  bool _pinnedToEndByReflow = false;
+
+  /// Set by [correctBy]; makes the next accepted [updateMetrics] notify even
+  /// when the metrics themselves are unchanged, so listeners hear about
+  /// layout-time offset corrections. Mirrors Flutter's
+  /// `_didChangeViewportDimensionOrReceiveCorrection`.
+  bool _receivedCorrection = false;
+
+  /// Whether a metrics notification is already scheduled for the end of the
+  /// current frame.
+  bool _notificationScheduled = false;
 
   /// The attached render object (used for index-based scrolling)
   Object? _attachedRenderObject;
@@ -47,22 +73,82 @@ class ScrollController extends ChangeNotifier {
   /// The total scrollable extent.
   double get scrollExtent => maxScrollExtent - minScrollExtent;
 
-  /// Updates the scroll metrics.
+  /// Applies a layout-time correction to [offset].
   ///
-  /// This is called by scrollable widgets during layout to update the scroll
-  /// bounds. Following Flutter's pattern, the offset is silently corrected
-  /// (without notification) if it's out of the new bounds, to avoid feedback
-  /// loops when bounds are estimated and changing.
-  void updateMetrics({
+  /// Changes [offset] by [correction] without notifying listeners. Following
+  /// Flutter's `ViewportOffset.correctBy` pattern, this may only be called
+  /// during layout, by the viewport render object that owns this controller,
+  /// after which the viewport must lay out again against the corrected value.
+  /// The correction is remembered so the accepting [updateMetrics] call still
+  /// notifies listeners even when the metrics themselves are unchanged.
+  void correctBy(double correction) {
+    _offset += correction;
+    _receivedCorrection = true;
+  }
+
+  /// Changes [offset] to [value] without notifying listeners and without
+  /// honoring the normal conventions for changing the scroll offset.
+  ///
+  /// Following Flutter's `ScrollPosition.correctPixels` pattern, this is for
+  /// subclasses adjusting their own position during layout — typically from
+  /// inside [updateMetrics] before returning false to reject the pass.
+  @protected
+  void correctPixels(double value) {
+    _offset = value;
+    _receivedCorrection = true;
+  }
+
+  /// Updates the scroll metrics from a layout pass and reports whether the
+  /// pass is acceptable.
+  ///
+  /// Called by scrollable render objects during layout. Returns true when the
+  /// metrics are accepted as-is. Returns false when the controller corrected
+  /// [offset] in response — the pass was laid out against a stale offset, and
+  /// the caller must lay out again with the corrected value, mirroring
+  /// Flutter's `ViewportOffset.applyContentDimensions` contract.
+  ///
+  /// [crossAxisExtent] is the viewport's extent perpendicular to the scroll
+  /// axis. A change in it means variable-extent content re-wrapped — the same
+  /// content now occupies different offsets — which is the one fact that
+  /// distinguishes a reflow from an append. When it changes while the view is
+  /// reading the tail, the offset is pinned to the end of the content: after
+  /// a re-wrap the end is still what the reader was reading. Null means the
+  /// caller doesn't track a cross axis; detection is skipped.
+  ///
+  /// Listeners are not notified synchronously — layout is too early for them
+  /// to usefully react, and reacting mid-layout would re-enter the pipeline.
+  /// A notification is coalesced and delivered after the frame completes.
+  bool updateMetrics({
     required double minScrollExtent,
     required double maxScrollExtent,
     required double viewportDimension,
     AxisDirection? axisDirection,
+    double? crossAxisExtent,
   }) {
     final oldMin = _minScrollExtent;
     final oldMax = _maxScrollExtent;
     final oldViewport = _viewportDimension;
     final oldAxisDirection = _axisDirection;
+
+    // Judged against the old metrics: whether the view was reading the tail
+    // before this update moved the goalposts. An unscrolled view is not
+    // "reading the tail" even when the old extent was zero.
+    final wasNearEnd =
+        _offset > 0 && _offset >= _maxScrollExtent - endReflowTolerance;
+
+    final reflowed = crossAxisExtent != null &&
+        _lastCrossAxisExtent != null &&
+        crossAxisExtent != _lastCrossAxisExtent;
+    if (crossAxisExtent != null) {
+      _lastCrossAxisExtent = crossAxisExtent;
+    }
+    // A correction this frame means a viewport is already steering the
+    // offset somewhere deliberate — a content anchor, which only exists when
+    // the view was *not* reading the tail — so [wasNearEnd], judged against
+    // the mid-negotiation offset, is meaningless and the pin stands down.
+    if (reflowed && wasNearEnd && !_receivedCorrection) {
+      _pinnedToEndByReflow = true;
+    }
 
     _minScrollExtent = minScrollExtent;
     _maxScrollExtent = maxScrollExtent;
@@ -71,15 +157,53 @@ class ScrollController extends ChangeNotifier {
       _axisDirection = axisDirection;
     }
 
-    // Silently correct offset if out of bounds (like Flutter's correctPixels).
-    // This doesn't notify listeners to avoid feedback loops during layout.
-    _offset = _offset.clamp(minScrollExtent, maxScrollExtent);
+    // Reflow end-pin. Re-applied every pass until the offset and the end
+    // agree, because estimated extents move the end between passes.
+    if (_pinnedToEndByReflow) {
+      if (_offset != maxScrollExtent) {
+        _offset = maxScrollExtent;
+        _scheduleNotification();
+        return false;
+      }
+      _pinnedToEndByReflow = false;
+    }
 
-    // Only notify listeners if the metrics (not offset) changed
+    // The caller laid out against the unclamped offset, so a clamp that
+    // moves it invalidates the pass.
+    final clamped = _offset.clamp(minScrollExtent, maxScrollExtent);
+    if (clamped != _offset) {
+      _offset = clamped;
+      _scheduleNotification();
+      return false;
+    }
+
     if (oldMin != _minScrollExtent ||
         oldMax != _maxScrollExtent ||
         oldViewport != _viewportDimension ||
-        oldAxisDirection != _axisDirection) {
+        oldAxisDirection != _axisDirection ||
+        _receivedCorrection) {
+      _receivedCorrection = false;
+      _scheduleNotification();
+    }
+    return true;
+  }
+
+  /// Schedules a coalesced listener notification for the end of the frame.
+  ///
+  /// Flutter's pattern: by layout time the frame's listeners have already
+  /// built, so a synchronous notification is at best useless and at worst
+  /// re-enters the pipeline. Without a binding (bare unit tests) the
+  /// notification is delivered synchronously instead.
+  void _scheduleNotification() {
+    if (_notificationScheduled) return;
+    _notificationScheduled = true;
+    try {
+      TerminalBinding.instance.addPostFrameCallback((_) {
+        _notificationScheduled = false;
+        notifyListeners();
+      });
+    } catch (_) {
+      _notificationScheduled = false;
       notifyListeners();
     }
   }
@@ -87,6 +211,7 @@ class ScrollController extends ChangeNotifier {
   /// Jumps the scroll position to the given value.
   void jumpTo(double value) {
     _offset = value.clamp(minScrollExtent, maxScrollExtent);
+    _pinnedToEndByReflow = false;
     notifyListeners();
   }
 

@@ -507,6 +507,12 @@ class RenderPadding extends RenderObject
     final innerConstraints = constraints.deflate(padding);
     child?.layout(innerConstraints, parentUsesSize: true);
 
+    // Write the child's offset here, not in paint for immediate updates.
+    final childParentData = child?.parentData;
+    if (childParentData is BoxParentData) {
+      childParentData.offset = Offset(padding.left, padding.top);
+    }
+
     // Set our size
     final childSize = child?.size ?? Size.zero;
     size = constraints.constrain(Size(
@@ -520,7 +526,6 @@ class RenderPadding extends RenderObject
     super.paint(canvas, offset);
     if (child != null) {
       final BoxParentData childParentData = child!.parentData as BoxParentData;
-      childParentData.offset = Offset(padding.left, padding.top);
       child!.paint(canvas, offset + childParentData.offset);
     }
   }

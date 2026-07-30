@@ -372,7 +372,6 @@ class _ListViewportElement extends RenderObjectElement {
         _teardownChild(_children[key]!);
         _children.remove(key);
       }
-
     }
 
     // Mark that children need to be updated with new props
@@ -477,7 +476,9 @@ class _ListViewportElement extends RenderObjectElement {
 
       // Update existing element if possible
       if (Component.canUpdate(existingChild.component, newChild)) {
-        existingChild.update(newChild);
+        if (!identical(existingChild.component, newChild)) {
+          existingChild.update(newChild);
+        }
         return existingChild;
       } else {
         // Can't update, replace element
@@ -516,7 +517,10 @@ class _ListViewportElement extends RenderObjectElement {
 
     if (oldSeparator != null &&
         Component.canUpdate(oldSeparator.component, separator)) {
-      oldSeparator.update(separator);
+      // Respect const separators
+      if (!identical(oldSeparator.component, separator)) {
+        oldSeparator.update(separator);
+      }
       return oldSeparator;
     } else {
       if (oldSeparator != null) _teardownChild(oldSeparator);
@@ -670,6 +674,47 @@ class RenderListViewport extends RenderObject with ScrollableRenderObjectMixin {
   void _handleScrollUpdate() {
     markNeedsLayout();
   }
+
+  /// Cross-axis extent of the previous layout pass, used to detect reflows.
+  ///
+  /// When the cross axis changes, variable-extent children re-wrap and every
+  /// layout offset after the first changed child moves. Without compensation
+  /// the scroll offset — an absolute distance, not a content position — then
+  /// points at different content, and the viewport appears to slide.
+  double? _lastCrossAxisExtent;
+
+  /// The anchor of the reflow gesture in progress. A drag resizes one column
+  /// at a time, and each step's re-pack can pull earlier words up onto the
+  /// top row — re-capturing per step would then re-anchor to that earlier
+  /// content and creep backward over a long gesture. As long as the offset
+  /// is exactly where the previous correction left it, the gesture is still
+  /// going and the original anchored character keeps its grip.
+  _ReflowAnchor? _gestureAnchor;
+
+  /// Where the last reflow correction settled, used to recognise the next
+  /// step of the same gesture. Any other offset means the user scrolled and
+  /// the held anchor no longer describes what they are looking at.
+  double? _lastAnchoredOffset;
+
+  /// Offsets within this distance of [_lastAnchoredOffset] count as the
+  /// continuation of the resize gesture in progress; anything farther means
+  /// the user scrolled in between. One half cell — corrections land on whole
+  /// cells, scrolls move at least one.
+  static const double _gestureContinuityTolerance = 0.5;
+
+  /// Set when [_anchorDepth] discovers the held anchor's leaf no longer
+  /// belongs to a live item, so the gesture anchor can be dropped after the
+  /// layout loop instead of retaining an unmounted subtree.
+  bool _anchorLeafDied = false;
+
+  /// Upper bound on layout passes per frame, mirroring Flutter's viewport
+  /// correction cap. Eager layout converges on the second pass; lazy layout
+  /// is seeded at the anchor and converges immediately unless the anchor
+  /// item shrank; the controller's end pin converges once the extent
+  /// estimate settles. Hitting the cap means viewport and controller never
+  /// reached consensus — a bug — which throws in debug builds; in release
+  /// the safe response in a live terminal is to stop correcting.
+  static const int _maxAnchorLayoutCycles = 10;
 
   @override
   void setupParentData(covariant RenderObject child) {
@@ -844,13 +889,253 @@ class RenderListViewport extends RenderObject with ScrollableRenderObjectMixin {
     return (bestIndex, bestOffset);
   }
 
+  /// Records the content at the viewport's anchor edge ahead of a cross-axis
+  /// reflow, or null when no anchoring is wanted for this pass.
+  ///
+  /// The anchor edge is the edge the scroll offset is measured from: the
+  /// painted top normally, the painted bottom when [reverse] is set.
+  _ReflowAnchor? _captureReflowAnchor(double crossAxisExtent) {
+    final previous = _lastCrossAxisExtent;
+    _lastCrossAxisExtent = crossAxisExtent;
+
+    final scrollOffset = _controller.offset;
+    final anchoredOffset = _lastAnchoredOffset;
+    if (anchoredOffset != null &&
+        (scrollOffset - anchoredOffset).abs() >= _gestureContinuityTolerance) {
+      // The user scrolled since the last correction: the held anchor no
+      // longer describes what they see, and holding it would retain a
+      // subtree the gesture is done with.
+      _gestureAnchor = null;
+      _lastAnchoredOffset = null;
+    }
+
+    if (previous == null || previous == crossAxisExtent) return null;
+    if (scrollOffset <= 0) return null;
+    // Within a cell of the very bottom the controller pins the offset to the
+    // content's end itself — it detects the reflow from the cross-axis
+    // extent handed to updateMetrics — so no content anchor is wanted.
+    if (scrollOffset >=
+        _controller.maxScrollExtent - ScrollController.endReflowTolerance) {
+      return null;
+    }
+
+    final held = _gestureAnchor;
+    if (held != null) return held;
+
+    final element = _element;
+    if (element == null) return null;
+
+    // Of the children whose previous-pass offsets are still on record, take
+    // the one starting closest to the viewport top without passing it: the
+    // first item any of whose rows are visible. Separators re-anchor via
+    // their neighbouring items. Only the previous pass's built set counts:
+    // in lazy mode, children kept alive for a selection carry layout offsets
+    // from whenever they were last built, which no longer mean anything.
+    int? bestIndex;
+    var bestOffset = double.negativeInfinity;
+    var bestExtent = 0.0;
+    Element? bestElement;
+    for (final entry in element._children.entries) {
+      if (entry.key < 0) continue;
+      final renderObject = _getRenderObject(entry.value);
+      if (renderObject == null || !_allChildrenSet.contains(renderObject)) {
+        continue;
+      }
+      final parentData = renderObject.parentData;
+      if (parentData is! ListViewParentData) continue;
+      final layoutOffset = parentData.layoutOffset;
+      final index = parentData.index;
+      if (layoutOffset == null || index == null) continue;
+      if (layoutOffset <= scrollOffset && layoutOffset > bestOffset) {
+        bestOffset = layoutOffset;
+        bestExtent = parentData.extent ?? 0.0;
+        bestIndex = index;
+        bestElement = entry.value;
+      }
+    }
+    if (bestIndex == null) return null;
+
+    final delta = scrollOffset - bestOffset;
+    // An edge past the item's content sits on a separator; it anchors to the
+    // item's end, not to a line inside it, so no leaf is captured. In a
+    // reversed viewport the edge row is content-addressed through the paint
+    // mirror.
+    final targetRow =
+        _reverse ? math.max(0.0, _mirroredRow(delta, bestExtent)) : delta;
+    final (leaf, char, rowsAfter) = delta >= bestExtent
+        ? (null, null, 0.0)
+        : _describeDepth(bestElement, targetRow);
+
+    return _ReflowAnchor(
+      index: bestIndex,
+      position: bestOffset,
+      delta: delta,
+      extent: bestExtent,
+      leaf: leaf,
+      char: char,
+      rowsAfter: rowsAfter,
+    );
+  }
+
+  /// Content-addresses [targetRow] within the anchor item: the paragraph
+  /// under it and the character starting its visual line, read from the
+  /// previous pass's geometry (children have not been relaid yet).
+  ///
+  /// A target row on a gap below a paragraph — block spacing, a divider —
+  /// anchors to the paragraph's *end* (a null character) plus the
+  /// width-stable rows in between: any inner line can re-wrap onto a
+  /// different row, but the gap always starts where the paragraph stops.
+  /// An item with no paragraph above the target yields no leaf and the
+  /// anchor falls back to its raw row depth.
+  (RenderObject?, int?, double) _describeDepth(
+    Element? itemElement,
+    double targetRow,
+  ) {
+    if (itemElement == null || scrollDirection != Axis.vertical) {
+      return (null, null, 0.0);
+    }
+    final itemRenderObject = _getRenderObject(itemElement);
+    if (itemRenderObject == null) return (null, null, 0.0);
+
+    ReflowAnchorable? within;
+    var withinTop = 0.0;
+    ReflowAnchorable? above;
+    var aboveTop = 0.0;
+    var aboveHeight = 0.0;
+    void walk(Element element) {
+      if (within != null) return;
+      if (element is RenderObjectElement) {
+        final renderObject = element.renderObject;
+        if (renderObject is ReflowAnchorable) {
+          final top = _rowsBetween(itemRenderObject, renderObject);
+          if (top != null) {
+            final height =
+                renderObject.hasSize ? renderObject.size.height : 0.0;
+            if (top <= targetRow && targetRow < top + height) {
+              within = renderObject;
+              withinTop = top;
+            } else if (top + height <= targetRow && top >= aboveTop) {
+              above = renderObject;
+              aboveTop = top;
+              aboveHeight = height;
+            }
+            return; // Paragraphs don't nest paragraphs.
+          }
+        }
+      }
+      element.visitChildren(walk);
+    }
+
+    walk(itemElement);
+
+    final inside = within;
+    if (inside != null) {
+      final char = inside.getCharacterIndexAtLocalPosition(
+        Offset(0, targetRow - withinTop),
+      );
+      return (inside as RenderObject, char, 0.0);
+    }
+    final nearest = above;
+    if (nearest != null) {
+      return (
+        nearest as RenderObject,
+        null,
+        targetRow - (aboveTop + aboveHeight),
+      );
+    }
+    return (null, null, 0.0);
+  }
+
+  /// Rows between [ancestor]'s top and [descendant]'s top, summed from the
+  /// parent-data offsets of the chain between them; null when [descendant]
+  /// is not in [ancestor]'s subtree.
+  double? _rowsBetween(RenderObject ancestor, RenderObject descendant) {
+    RenderObject node = descendant;
+    var total = 0.0;
+    while (!identical(node, ancestor)) {
+      final parentData = node.parentData;
+      if (parentData is BoxParentData) total += parentData.offset.dy;
+      final parent = node.parent;
+      if (parent is! RenderObject || identical(node, this)) return null;
+      node = parent;
+    }
+    return total;
+  }
+
+  /// Rows painted between an item's own top and the row at layout depth
+  /// [row], in a reversed viewport.
+  double _mirroredRow(double row, double extent) => extent - 1 - row;
+
+  /// How far the offset must move so the anchored content is back at the
+  /// viewport's anchor edge, judged against the pass that just ran. Zero
+  /// when unanchored, converged, or the anchored item no longer exists.
+  double _reflowCorrection(_ReflowAnchor? anchor) {
+    if (anchor == null) return 0.0;
+    final info = getItemOffsetAndExtent(anchor.index);
+    if (info == null) return 0.0;
+    final (itemOffset, itemExtent) = info;
+    final target = itemOffset + _anchorDepth(anchor, itemExtent);
+    return target - _controller.offset;
+  }
+
+  /// Rows into the anchor item where the anchored content now sits, from the
+  /// layout that just ran: the anchored paragraph's fresh position within the
+  /// item plus the row its anchored character landed on.
+  double _anchorDepth(_ReflowAnchor anchor, double itemExtent) {
+    if (anchor.delta >= anchor.extent) {
+      return itemExtent + (anchor.delta - anchor.extent);
+    }
+
+    final leaf = anchor.leaf;
+    if (leaf == null) {
+      return math.min(anchor.delta, itemExtent);
+    }
+
+    // Walk up to the list item boundary accumulating this pass's offsets.
+    // The node found must be the very render object the anchor item's element
+    // owns right now.
+    RenderObject node = leaf;
+    var top = 0.0;
+    while (true) {
+      final parentData = node.parentData;
+      if (parentData is ListViewParentData) {
+        final itemElement = _element?._children[anchor.index];
+        final liveItem =
+            itemElement == null ? null : _getRenderObject(itemElement);
+        if (liveItem == null || !identical(liveItem, node)) {
+          _anchorLeafDied = true;
+          return math.min(anchor.delta, itemExtent);
+        }
+        break;
+      }
+      if (parentData is BoxParentData) top += parentData.offset.dy;
+      final parent = node.parent;
+      if (parent is! RenderObject || identical(node, this)) {
+        _anchorLeafDied = true;
+        return math.min(anchor.delta, itemExtent);
+      }
+      node = parent;
+    }
+
+    // A char anchors a line inside the paragraph; a charless leaf anchors
+    // the gap after it, which starts wherever the paragraph now ends.
+    final char = anchor.char;
+    final row = char != null
+        ? top +
+            (leaf as ReflowAnchorable).localPositionForCharacterIndex(char).dy
+        : top + (leaf.hasSize ? leaf.size.height : 0.0) + anchor.rowsAfter;
+    // The row is measured from the item's own top; in a reversed viewport
+    // it mirrors back into layout depth against the item's fresh extent.
+    final depth = _reverse ? _mirroredRow(row, itemExtent) : row;
+    return depth.clamp(0.0, itemExtent);
+  }
+
   @override
   void performLayout() {
-    _visibleChildren.clear();
-    _allChildren.clear();
-    _allChildrenSet.clear();
-
     if (_element == null) {
+      _visibleChildren.clear();
+      _allChildren.clear();
+      _allChildrenSet.clear();
       size = constraints.constrain(Size.zero);
       return;
     }
@@ -892,34 +1177,104 @@ class RenderListViewport extends RenderObject with ScrollableRenderObjectMixin {
             maxWidth: itemExtent ?? double.infinity,
           );
 
-    double totalExtent = 0;
+    // A cross-axis reflow is about to move every layout offset. Record which
+    // item sits at the viewport top now — from the offsets of the previous
+    // pass, still intact in parent data — so the corrected offset can point
+    // at the same content afterwards.
+    final anchor = _captureReflowAnchor(crossAxisExtent);
 
-    if (_lazy) {
-      // Lazy mode: only build visible children
-      totalExtent = _performLazyLayout(
-        viewportExtent: viewportExtent,
-        childConstraints: childConstraints,
-        itemCount: itemCount,
-      );
-    } else {
-      // Non-lazy mode: build all children for accurate extent
-      totalExtent = _performEagerLayout(
-        viewportExtent: viewportExtent,
-        childConstraints: childConstraints,
-        itemCount: itemCount,
-      );
-    }
-
-    // Update scroll metrics with axis direction
-    final maxExtent = math.max(0.0, totalExtent - viewportExtent);
+    // Layout is an attempt, in Flutter's viewport-correction sense: a pass
+    // both re-measures children and reveals how far the anchored content
+    // moved, and the controller may reject the resulting metrics by
+    // correcting its own offset (an end pin, a clamp).
     final axisDirection =
         axisToAxisDirection(scrollDirection, reverse: _reverse);
-    _controller.updateMetrics(
-      minScrollExtent: 0,
-      maxScrollExtent: maxExtent,
-      viewportDimension: viewportExtent,
-      axisDirection: axisDirection,
-    );
+    double totalExtent = 0;
+    var layoutCycles = 0;
+    var settled = false;
+    while (true) {
+      _visibleChildren.clear();
+      _allChildren.clear();
+      _allChildrenSet.clear();
+
+      if (_lazy) {
+        // Lazy mode: only build visible children
+        totalExtent = _performLazyLayout(
+          viewportExtent: viewportExtent,
+          childConstraints: childConstraints,
+          itemCount: itemCount,
+          anchorSeed: anchor == null ? null : (anchor.index, anchor.position),
+        );
+      } else {
+        // Non-lazy mode: build all children for accurate extent
+        totalExtent = _performEagerLayout(
+          viewportExtent: viewportExtent,
+          childConstraints: childConstraints,
+          itemCount: itemCount,
+        );
+      }
+
+      layoutCycles += 1;
+      if (layoutCycles < _maxAnchorLayoutCycles) {
+        var correction = _reflowCorrection(anchor);
+        if (correction != 0.0) {
+          // An anchor may want an offset the re-wrapped content no longer
+          // reaches (a widening reflow that shrank everything)
+          final maxOffset = math.max(0.0, totalExtent - viewportExtent);
+          correction = (_controller.offset + correction).clamp(0.0, maxOffset) -
+              _controller.offset;
+        }
+        if (correction.abs() >= precisionErrorTolerance) {
+          _controller.correctBy(correction);
+          continue;
+        }
+        settled = _controller.updateMetrics(
+          minScrollExtent: 0,
+          maxScrollExtent: math.max(0.0, totalExtent - viewportExtent),
+          viewportDimension: viewportExtent,
+          axisDirection: axisDirection,
+          crossAxisExtent: crossAxisExtent,
+        );
+        if (!settled) continue;
+      } else {
+        // Out of attempts: take this pass's metrics as they are and stop.
+        _controller.updateMetrics(
+          minScrollExtent: 0,
+          maxScrollExtent: math.max(0.0, totalExtent - viewportExtent),
+          viewportDimension: viewportExtent,
+          axisDirection: axisDirection,
+          crossAxisExtent: crossAxisExtent,
+        );
+      }
+      break;
+    }
+    assert(() {
+      if (!settled) {
+        throw FlutterError(
+          'RenderListViewport exceeded its maximum number of layout cycles.\n'
+          'During layout, the viewport retries when the reflow anchor '
+          'corrects the scroll offset or the ScrollController rejects the '
+          'resulting metrics, but after $_maxAnchorLayoutCycles passes there '
+          'was still no consensus on the scroll offset. This usually means '
+          'the anchor and the controller apply opposing corrections, or a '
+          'ScrollController subclass corrects the offset unconditionally.',
+        );
+      }
+      return true;
+    }());
+
+    // Remember where this reflow settled — post-consensus — so the next
+    // step of a continuing resize gesture can pick the same anchor back up
+    if (anchor != null) {
+      if (_anchorLeafDied) {
+        _gestureAnchor = null;
+        _lastAnchoredOffset = null;
+      } else {
+        _gestureAnchor = anchor;
+        _lastAnchoredOffset = _controller.offset;
+      }
+    }
+    _anchorLeafDied = false;
 
     // Clean up children outside the cached range in lazy mode, keeping
     // items that hold part of an active selection alive so the selection
@@ -1003,6 +1358,7 @@ class RenderListViewport extends RenderObject with ScrollableRenderObjectMixin {
     required double viewportExtent,
     required BoxConstraints childConstraints,
     required int? itemCount,
+    (int index, double position)? anchorSeed,
   }) {
     final scrollOffset = _controller.offset;
 
@@ -1011,8 +1367,14 @@ class RenderListViewport extends RenderObject with ScrollableRenderObjectMixin {
         (scrollOffset - _cacheExtent).clamp(0.0, double.infinity);
     final cacheEnd = scrollOffset + viewportExtent + _cacheExtent;
 
-    // Find first item to build (including cache before visible area)
-    final (startIndex, startPosition) = _findStartingPosition(cacheStart);
+    // Find first item to build (including cache before visible area). A
+    // reflow anchor overrides the search: lazy offsets are dead reckoning,
+    // not absolute truth, so rather than hunting for where the anchored item
+    // landed, seed the reckoning so it never moves. The pass builds forward
+    // from the anchor at its old position, and the stale offsets of other
+    // items — meaningless across a reflow — never enter the frame.
+    final (startIndex, startPosition) =
+        anchorSeed ?? _findStartingPosition(cacheStart);
     int itemIndex = startIndex;
     double currentPosition = startPosition;
 
@@ -1414,6 +1776,41 @@ class RenderListViewport extends RenderObject with ScrollableRenderObjectMixin {
     // If item is not found and we can't estimate, return null
     return null;
   }
+}
+
+/// The content position pinned across a cross-axis reflow.
+///
+/// The item at the viewport top is held by [index] and its pre-reflow
+/// [position]; the depth *within* the item is held content-addressed: the
+/// paragraph render object under the viewport top ([leaf]) and the character
+/// offset of its anchored visual line ([char]). Characters are
+/// width-independent, and render objects persist across relayout, so after
+/// a reflow the anchored line's new row is read exactly.
+///
+/// [rowsAfter] carries the width-stable rows between that line and the
+/// viewport top when the top sat on a gap (block spacing, a divider) below
+/// the paragraph. [delta] and [extent] are the raw pre-reflow row depth and
+/// item extent: a top sitting past the item's content (a separator row)
+/// anchors to the item's end plus the overshoot, and a leafless or
+/// dead-leaf anchor falls back to the raw depth.
+class _ReflowAnchor {
+  const _ReflowAnchor({
+    required this.index,
+    required this.position,
+    required this.delta,
+    required this.extent,
+    this.leaf,
+    this.char,
+    this.rowsAfter = 0.0,
+  });
+
+  final int index;
+  final double position;
+  final double delta;
+  final double extent;
+  final RenderObject? leaf;
+  final int? char;
+  final double rowsAfter;
 }
 
 /// Information about a child in the viewport.

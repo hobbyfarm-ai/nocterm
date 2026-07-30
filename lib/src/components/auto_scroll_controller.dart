@@ -6,12 +6,12 @@ import 'package:nocterm/nocterm.dart';
 class AutoScrollController extends ScrollController {
   AutoScrollController({
     super.initialScrollOffset,
-    this.autoScrollThreshold = 1.0,
+    this.autoScrollThreshold = ScrollController.endReflowTolerance,
   });
 
   /// The distance from the bottom within which auto-scroll is enabled.
   /// If the user is within this distance from the bottom, new content
-  /// will trigger auto-scroll. Default is 1.0 pixel.
+  /// will trigger auto-scroll. Defaults to one terminal cell.
   final double autoScrollThreshold;
 
   /// Whether auto-scroll is currently enabled based on scroll position.
@@ -24,46 +24,39 @@ class AutoScrollController extends ScrollController {
   double _previousMaxScrollExtent = 0.0;
 
   @override
-  void updateMetrics({
+  bool updateMetrics({
     required double minScrollExtent,
     required double maxScrollExtent,
     required double viewportDimension,
     AxisDirection? axisDirection,
+    double? crossAxisExtent,
   }) {
-    // Check if we should auto-scroll before updating metrics
+    // Judged before super moves the goalposts: whether the view was reading
+    // the tail, and whether this update brought new content.
     final wasNearBottom = _isNearBottom();
     final contentGrew = maxScrollExtent > _previousMaxScrollExtent;
+    _previousMaxScrollExtent = maxScrollExtent;
 
-    // Update metrics
-    super.updateMetrics(
+    final accepted = super.updateMetrics(
       minScrollExtent: minScrollExtent,
       maxScrollExtent: maxScrollExtent,
       viewportDimension: viewportDimension,
       axisDirection: axisDirection,
+      crossAxisExtent: crossAxisExtent,
     );
+    if (!accepted) return false;
 
-    // Auto-scroll if we were near bottom and content grew
+    // Follow new content while the view is reading the tail. The offset is
+    // corrected synchronously and the pass rejected, so the viewport lays
+    // out again and the tail is on screen this frame — never a frame late.
     if (_isAutoScrollEnabled && wasNearBottom && contentGrew) {
-      // Schedule scroll to end after the frame
-      try {
-        TerminalBinding.instance.addPostFrameCallback((_) {
-          if (isReversed) {
-            scrollToStart(); // In reverse mode, scroll to start (offset 0)
-          } else {
-            scrollToEnd(); // In normal mode, scroll to end
-          }
-        });
-      } catch (e) {
-        // In test environment or when binding is not available, scroll immediately
-        if (isReversed) {
-          scrollToStart();
-        } else {
-          scrollToEnd();
-        }
+      final target = isReversed ? minScrollExtent : maxScrollExtent;
+      if (offset != target) {
+        correctPixels(target);
+        return false;
       }
     }
-
-    _previousMaxScrollExtent = maxScrollExtent;
+    return true;
   }
 
   /// Check if the scroll position is near the bottom.

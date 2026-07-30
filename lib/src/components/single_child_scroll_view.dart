@@ -323,11 +323,19 @@ class RenderSingleChildViewport extends RenderObject
         ? child!.size.height
         : child!.size.width;
 
-    _controller.updateMetrics(
-      minScrollExtent: 0,
-      maxScrollExtent: math.max(0, scrollExtent - viewportExtent),
-      viewportDimension: viewportExtent,
-    );
+    // The controller may reject a pass by correcting its own offset (an end
+    // pin after a cross-axis reflow, a clamp)
+    final double crossAxisExtent =
+        scrollDirection == Axis.vertical ? size.width : size.height;
+    var metricsAttempts = 0;
+    while (!_controller.updateMetrics(
+          minScrollExtent: 0,
+          maxScrollExtent: math.max(0, scrollExtent - viewportExtent),
+          viewportDimension: viewportExtent,
+          axisDirection: axisToAxisDirection(scrollDirection),
+          crossAxisExtent: crossAxisExtent,
+        ) &&
+        ++metricsAttempts < 10) {}
 
     // Store scroll offset in child's parent data so globalPaintOffset
     // traversals can see the scroll translation.
