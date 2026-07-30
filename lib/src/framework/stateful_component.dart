@@ -85,8 +85,8 @@ abstract class State<T extends StatefulComponent> {
   @protected
   void setState(VoidCallback fn) {
     assert(_element != null);
-    assert(_element!._lifecycleState == _ElementLifecycle.active,
-        'Element is not active but ${_element!._lifecycleState} instead');
+    assert(_element!._lifecycleState != _ElementLifecycle.defunct,
+        'setState() called after dispose()');
 
     fn();
     _element!.markNeedsBuild();

@@ -215,7 +215,13 @@ abstract class Element implements BuildContext {
   }
 
   void markNeedsBuild() {
-    assert(_lifecycleState == _ElementLifecycle.active);
+    assert(_lifecycleState != _ElementLifecycle.defunct);
+    // An inactive element (deactivated but not yet unmounted) may still hear
+    // from timers or streams its state owns; it rebuilds on reactivation, so
+    // the notification is safely ignored rather than asserted against.
+    if (_lifecycleState != _ElementLifecycle.active) {
+      return;
+    }
     if (_dirty) {
       return;
     }
