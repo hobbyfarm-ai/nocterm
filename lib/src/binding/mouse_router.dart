@@ -1,6 +1,5 @@
 import 'package:nocterm/nocterm.dart';
 import 'package:nocterm/src/navigation/render_theater.dart';
-import 'package:nocterm/src/rendering/scrollable_render_object.dart';
 
 import '../rendering/mouse_hit_test.dart';
 import '../rendering/mouse_tracker.dart';

@@ -18,6 +18,8 @@ class _TestTextRender extends RenderObject
 
   TextLayoutResult? _layoutResult;
 
+  void selectRange(int? start, int? end) => setSelectionRange(start, end);
+
   @override
   String get selectableText => _text;
 
@@ -182,6 +184,43 @@ void main() {
         const SelectWordSelectionEvent(globalPosition: Offset(1, 0)),
       );
       expect(render.getSelectedContent()?.plainText, '  ');
+    });
+  });
+
+  group('TextSelectable programmatic range', () {
+    test('sets the selection edges directly', () {
+      final render = _laidOut('hello world');
+      render.selectRange(6, 11);
+
+      expect(render.hasSelection, isTrue);
+      expect(render.getSelectedContent()?.plainText, 'world');
+      expect(render.value.status, SelectionStatus.uncollapsed);
+    });
+
+    test('clamps offsets outside the content', () {
+      final render = _laidOut('hello');
+      render.selectRange(-3, 99);
+
+      expect(render.selectionStart, 0);
+      expect(render.selectionEnd, 5);
+      expect(render.getSelectedContent()?.plainText, 'hello');
+    });
+
+    test('reversed edges normalize in selected content', () {
+      final render = _laidOut('hello world');
+      render.selectRange(11, 6);
+
+      expect(render.getSelectedContent()?.plainText, 'world');
+    });
+
+    test('nulls clear the selection', () {
+      final render = _laidOut('hello');
+      render.selectRange(0, 5);
+      render.selectRange(null, null);
+
+      expect(render.hasSelection, isFalse);
+      expect(render.getSelectedContent(), isNull);
+      expect(render.value.status, SelectionStatus.none);
     });
   });
 

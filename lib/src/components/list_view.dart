@@ -3,8 +3,6 @@ import 'dart:math' as math;
 import 'package:nocterm/nocterm.dart';
 import 'package:nocterm/src/framework/terminal_canvas.dart';
 
-import '../rendering/scrollable_render_object.dart';
-
 /// Signature for a function that creates a widget for a given index.
 typedef IndexedWidgetBuilder = Component? Function(
     BuildContext context, int index);

@@ -83,6 +83,7 @@ export 'src/foundation/performance.dart';
 export 'src/foundation/nocterm_error.dart';
 export 'src/rendering/debug.dart';
 export 'src/rendering/reflow_anchorable.dart';
+export 'src/rendering/scrollable_render_object.dart';
 export 'src/components/debug_overlay.dart';
 
 // Widgets

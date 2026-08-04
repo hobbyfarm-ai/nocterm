@@ -161,6 +161,17 @@ mixin TextSelectable on RenderObject, Selectable implements ReflowAnchorable {
     markNeedsPaint();
   }
 
+  /// Sets the selection edges to char offsets, clamped to the content;
+  /// nulls clear.
+  @protected
+  void setSelectionRange(int? start, int? end) {
+    final len = contentLength;
+    _setSelection(
+      start == null ? null : (start < 0 ? 0 : (start > len ? len : start)),
+      end == null ? null : (end < 0 ? 0 : (end > len ? len : end)),
+    );
+  }
+
   /// Notifies this mixin that content or layout changed.
   ///
   /// Call at the end of `performLayout`. Selection edges are clamped to the
