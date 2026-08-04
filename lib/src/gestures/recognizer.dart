@@ -1,4 +1,3 @@
-import '../keyboard/mouse_event.dart';
 import '../framework/framework.dart';
 
 /// The possible states of a [GestureRecognizer].
@@ -29,20 +28,20 @@ abstract class GestureRecognizer {
   Offset? get initialPosition => _initialPosition;
 
   /// Start tracking a new pointer.
-  void addPointer(MouseEvent event, Offset localPosition) {
-    _initialPosition = localPosition;
+  void addPointer(Offset position) {
+    _initialPosition = position;
     _state = GestureRecognizerState.possible;
-    handlePointerDown(event, localPosition);
+    handlePointerDown(position);
   }
 
   /// Handle a pointer down event.
-  void handlePointerDown(MouseEvent event, Offset localPosition);
+  void handlePointerDown(Offset position);
 
   /// Handle a pointer up event.
-  void handlePointerUp(MouseEvent event, Offset localPosition);
+  void handlePointerUp(Offset position);
 
   /// Handle a pointer move event.
-  void handlePointerMove(MouseEvent event, Offset localPosition);
+  void handlePointerMove(Offset position);
 
   /// Called when this recognizer wins the gesture arena.
   void acceptGesture() {

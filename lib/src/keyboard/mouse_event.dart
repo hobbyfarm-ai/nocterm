@@ -18,6 +18,10 @@ class MouseEvent {
   /// The set of mouse buttons currently held down (enriched by [MouseTracker]).
   final Set<MouseButton> buttons;
 
+  /// Whether this event is [button] going down, as opposed to a report that
+  /// merely carries a button pressed by some earlier event.
+  final bool startsPress;
+
   const MouseEvent({
     required this.button,
     required this.x,
@@ -25,6 +29,7 @@ class MouseEvent {
     required this.pressed,
     this.isMotion = false,
     this.buttons = const {},
+    this.startsPress = false,
   });
 
   /// Whether the primary (left) button is currently held down.

@@ -1154,7 +1154,6 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
 
   // Mouse interaction state
   MouseTrackerAnnotation? _mouseAnnotation;
-  bool _isLeftButtonPressed = false;
   int? _dragAnchorOffset;
   DateTime? _lastClickTime;
   int? _lastClickOffset;
@@ -1526,43 +1525,12 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
 
   void _updateMouseAnnotation() {
     _mouseAnnotation = MouseTrackerAnnotation(
-      onEnter: (event) {
-        if (event.button == MouseButton.left) {
-          final leftDown = event.pressed || event.isPrimaryButtonDown;
-          if (leftDown && !_isLeftButtonPressed) {
-            _isLeftButtonPressed = true;
-            _handlePointerDown(event);
-          } else if (!leftDown) {
-            _isLeftButtonPressed = false;
-          }
-        }
-      },
-      onExit: (event) {
-        if (_dragAnchorOffset != null) {
-          // End drag when leaving the region, matching SelectionArea behavior.
-          _handlePointerMove(event);
-          _handlePointerUp(event);
-        }
-        _isLeftButtonPressed = false;
-      },
-      onHover: (event) {
-        if (event.button == MouseButton.wheelUp ||
-            event.button == MouseButton.wheelDown) {
-          return;
-        }
-
-        if (event.button == MouseButton.left) {
-          final leftDown = event.pressed || event.isPrimaryButtonDown;
-          if (leftDown && !_isLeftButtonPressed) {
-            _isLeftButtonPressed = true;
-            _handlePointerDown(event);
-          } else if (!leftDown && _isLeftButtonPressed) {
-            _isLeftButtonPressed = false;
-            _handlePointerUp(event);
-          } else if (leftDown && _isLeftButtonPressed) {
-            _handlePointerMove(event);
-          }
-        }
+      dragPolicy: DragPolicy.capture,
+      onGesture: (update) => switch (update) {
+        GestureBegan(:final anchor) => _handlePointerDown(anchor),
+        GestureDragged(:final position) => _handlePointerMove(position),
+        GestureEnded(:final position) => _handlePointerUp(position),
+        GestureCancelled(:final position) => _handlePointerUp(position),
       },
       renderObject: this,
     );
@@ -1611,10 +1579,11 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
     return charIndex;
   }
 
-  void _handlePointerDown(MouseEvent event) {
+  void _handlePointerDown(Offset position) {
     if (_layoutResult == null) return;
 
-    final charIndex = _getCharIndexFromMousePosition(event.x, event.y);
+    final charIndex = _getCharIndexFromMousePosition(
+        position.dx.toInt(), position.dy.toInt());
     final now = DateTime.now();
 
     // Double-click detection
@@ -1644,10 +1613,11 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
     }
   }
 
-  void _handlePointerMove(MouseEvent event) {
+  void _handlePointerMove(Offset position) {
     if (_dragAnchorOffset == null || _layoutResult == null) return;
 
-    final charIndex = _getCharIndexFromMousePosition(event.x, event.y);
+    final charIndex = _getCharIndexFromMousePosition(
+        position.dx.toInt(), position.dy.toInt());
 
     final newSelection = TextSelection(
       baseOffset: _dragAnchorOffset!,
@@ -1663,7 +1633,7 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
     }
   }
 
-  void _handlePointerUp(MouseEvent event) {
+  void _handlePointerUp(Offset position) {
     _dragAnchorOffset = null;
   }
 

@@ -64,11 +64,11 @@ void main() {
             ),
           );
 
-          // The press hit-tests and starts a captured drag.
           await tester.press(0, 0);
+          final binding = NoctermTestBinding.instance;
+          binding.routeMouseEvent(_motion(1, 0));
           final baseline = _CountingTextRender.hitTests;
 
-          final binding = NoctermTestBinding.instance;
           for (var i = 0; i < 40; i++) {
             binding.routeMouseEvent(_motion(1 + (i % 20), 0));
           }

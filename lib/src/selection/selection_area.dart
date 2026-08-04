@@ -1,9 +1,9 @@
-import '../binding/mouse_router.dart';
 import '../binding/scheduler_binding.dart';
 import '../framework/framework.dart';
 import '../keyboard/mouse_event.dart';
 import '../rendering/mouse_region.dart';
 import '../rendering/mouse_tracker.dart';
+import '../rendering/pointer_gesture.dart';
 import '../style.dart';
 import '../theme/tui_theme.dart';
 import 'selection.dart';
@@ -201,12 +201,11 @@ class RenderSelectionArea extends RenderMouseRegion {
 
   void Function(String)? onSelectionCompleted;
 
-  bool _isLeftButtonPressed = false;
-  bool _isDragging = false;
   Offset _lastPointerPosition = Offset.zero;
   DateTime? _lastPressTime;
   Offset? _lastPressPosition;
   bool _postFrameEdgeUpdateScheduled = false;
+  bool _isDragging = false;
 
   @override
   void attach(PipelineOwner owner) {
@@ -223,15 +222,8 @@ class RenderSelectionArea extends RenderMouseRegion {
   @override
   void dispose() {
     _selectionAnnotation?.validForMouseTracker = false;
-    if (_isDragging) _mouseTracker?.releaseCapture();
     if (identical(_delegate.container, this)) _delegate.container = null;
     super.dispose();
-  }
-
-  /// The binding's mouse tracker, used for pointer capture during drags.
-  MouseTracker? get _mouseTracker {
-    final binding = NoctermBinding.instance;
-    return binding is MouseRouter ? binding.mouseTracker : null;
   }
 
   MouseTrackerAnnotation? _selectionAnnotation;
@@ -242,50 +234,29 @@ class RenderSelectionArea extends RenderMouseRegion {
 
   void _updateSelectionAnnotation() {
     _selectionAnnotation = MouseTrackerAnnotation(
-      onEnter: (event) {
-        if (event.button != MouseButton.left) return;
-        final leftDown = event.pressed || event.isPrimaryButtonDown;
-        if (leftDown && !_isLeftButtonPressed) {
-          _isLeftButtonPressed = true;
-          _handlePointerDown(event);
-        } else if (!leftDown) {
-          _isLeftButtonPressed = false;
-        }
-      },
-      // While a drag is active the tracker's pointer capture routes all
-      // events here as hovers, so exit is only seen outside a drag.
-      onExit: (event) {
-        _isLeftButtonPressed = false;
+      dragPolicy: DragPolicy.capture,
+      onGesture: (update) => switch (update) {
+        GestureBegan(:final anchor) => _handlePointerDown(anchor),
+        GestureDragged(:final position) => _handlePointerMove(position),
+        GestureEnded(:final position) => _handlePointerUp(position),
+        GestureCancelled() => _isDragging = false,
       },
       onHover: (event) {
-        if (event.button == MouseButton.wheelUp ||
-            event.button == MouseButton.wheelDown) {
-          if (_isDragging || event.isPrimaryButtonDown) {
-            // Content shifts under the unmoving pointer; re-resolve the end
-            // edge after the scroll has been laid out.
-            _scheduleDragEdgeUpdate();
-          }
+        if (event.button != MouseButton.wheelUp &&
+            event.button != MouseButton.wheelDown) {
           return;
         }
-
-        if (event.button != MouseButton.left) return;
-        final leftDown = event.pressed || event.isPrimaryButtonDown;
-        if (leftDown && !_isLeftButtonPressed) {
-          _isLeftButtonPressed = true;
-          _handlePointerDown(event);
-        } else if (!leftDown && _isLeftButtonPressed) {
-          _isLeftButtonPressed = false;
-          _handlePointerUp(event);
-        } else if (leftDown && _isLeftButtonPressed) {
-          _handlePointerMove(event);
+        if (_isDragging || event.isPrimaryButtonDown) {
+          // Content shifts under the unmoving pointer; re-resolve the end
+          // edge after the scroll has been laid out.
+          _scheduleDragEdgeUpdate();
         }
       },
       renderObject: this,
     );
   }
 
-  void _handlePointerDown(MouseEvent event) {
-    final position = Offset(event.x.toDouble(), event.y.toDouble());
+  void _handlePointerDown(Offset position) {
     final now = DateTime.now();
     final isDoubleClick = _lastPressTime != null &&
         now.difference(_lastPressTime!) < _doubleClickWindow &&
@@ -294,8 +265,6 @@ class RenderSelectionArea extends RenderMouseRegion {
     _lastPressPosition = position;
     _lastPointerPosition = position;
     _isDragging = true;
-    final annotation = _selectionAnnotation;
-    if (annotation != null) _mouseTracker?.capture(annotation);
 
     if (isDoubleClick) {
       _delegate.dispatchSelectionEvent(
@@ -308,17 +277,14 @@ class RenderSelectionArea extends RenderMouseRegion {
     _dispatchEndEdgeUpdate(position);
   }
 
-  void _handlePointerMove(MouseEvent event) {
+  void _handlePointerMove(Offset position) {
     if (!_isDragging) return;
-    final position = Offset(event.x.toDouble(), event.y.toDouble());
     _lastPointerPosition = position;
     _dispatchEndEdgeUpdate(position);
   }
 
-  void _handlePointerUp(MouseEvent event) {
+  void _handlePointerUp(Offset position) {
     if (!_isDragging) return;
-    _mouseTracker?.releaseCapture();
-    final position = Offset(event.x.toDouble(), event.y.toDouble());
     if (position != _lastPointerPosition) {
       _lastPointerPosition = position;
       _dispatchEndEdgeUpdate(position);

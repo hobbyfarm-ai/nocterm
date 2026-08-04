@@ -1,5 +1,4 @@
 import 'dart:async';
-import '../keyboard/mouse_event.dart';
 import '../framework/framework.dart';
 import 'recognizer.dart';
 import 'events.dart';
@@ -35,28 +34,28 @@ class LongPressGestureRecognizer extends GestureRecognizer {
   static const double _kTouchSlop = 2.0; // cells
 
   @override
-  void handlePointerDown(MouseEvent event, Offset localPosition) {
-    _downPosition = localPosition;
+  void handlePointerDown(Offset position) {
+    _downPosition = position;
     _longPressAccepted = false;
 
     // Start timer for long press
     _longPressTimer?.cancel();
     _longPressTimer = Timer(duration, () {
       if (_downPosition != null) {
-        _acceptLongPress(event, localPosition);
+        _acceptLongPress(position);
       }
     });
   }
 
   @override
-  void handlePointerUp(MouseEvent event, Offset localPosition) {
+  void handlePointerUp(Offset position) {
     // Cancel the timer if pointer is released before long press
     _longPressTimer?.cancel();
 
     if (_longPressAccepted && onLongPressEnd != null) {
       final details = LongPressEndDetails(
-        globalPosition: Offset(event.x.toDouble(), event.y.toDouble()),
-        localPosition: localPosition,
+        globalPosition: position,
+        localPosition: position,
       );
       onLongPressEnd?.call(details);
     }
@@ -65,14 +64,14 @@ class LongPressGestureRecognizer extends GestureRecognizer {
   }
 
   @override
-  void handlePointerMove(MouseEvent event, Offset localPosition) {
+  void handlePointerMove(Offset position) {
     if (_downPosition == null) {
       return;
     }
 
     // Check if moved too far from initial position
-    final dx = (localPosition.dx - _downPosition!.dx).abs();
-    final dy = (localPosition.dy - _downPosition!.dy).abs();
+    final dx = (position.dx - _downPosition!.dx).abs();
+    final dy = (position.dy - _downPosition!.dy).abs();
 
     if (dx > _kTouchSlop || dy > _kTouchSlop) {
       // Moved too far, cancel long press
@@ -83,13 +82,13 @@ class LongPressGestureRecognizer extends GestureRecognizer {
     }
   }
 
-  void _acceptLongPress(MouseEvent event, Offset localPosition) {
+  void _acceptLongPress(Offset position) {
     _longPressAccepted = true;
 
     if (onLongPressStart != null) {
       final details = LongPressStartDetails(
-        globalPosition: Offset(event.x.toDouble(), event.y.toDouble()),
-        localPosition: localPosition,
+        globalPosition: position,
+        localPosition: position,
       );
       onLongPressStart?.call(details);
     }

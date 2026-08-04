@@ -1,5 +1,4 @@
 import 'dart:async';
-import '../keyboard/mouse_event.dart';
 import '../framework/framework.dart';
 import 'recognizer.dart';
 import 'events.dart';
@@ -36,15 +35,15 @@ class TapGestureRecognizer extends GestureRecognizer {
   static const double _kTouchSlop = 2.0; // cells
 
   @override
-  void handlePointerDown(MouseEvent event, Offset localPosition) {
-    _downPosition = localPosition;
+  void handlePointerDown(Offset position) {
+    _downPosition = position;
     _sentTapDown = false;
     _wonArena = false;
 
     if (onTapDown != null) {
       final details = TapDownDetails(
-        globalPosition: Offset(event.x.toDouble(), event.y.toDouble()),
-        localPosition: localPosition,
+        globalPosition: position,
+        localPosition: position,
       );
       onTapDown?.call(details);
       _sentTapDown = true;
@@ -52,14 +51,14 @@ class TapGestureRecognizer extends GestureRecognizer {
   }
 
   @override
-  void handlePointerUp(MouseEvent event, Offset localPosition) {
+  void handlePointerUp(Offset position) {
     if (_downPosition == null) {
       return;
     }
 
     // Check if the pointer moved too far
-    final dx = (localPosition.dx - _downPosition!.dx).abs();
-    final dy = (localPosition.dy - _downPosition!.dy).abs();
+    final dx = (position.dx - _downPosition!.dx).abs();
+    final dy = (position.dy - _downPosition!.dy).abs();
 
     if (dx > _kTouchSlop || dy > _kTouchSlop) {
       // Moved too far, cancel the tap
@@ -70,8 +69,8 @@ class TapGestureRecognizer extends GestureRecognizer {
     // Call onTapUp
     if (onTapUp != null) {
       final details = TapUpDetails(
-        globalPosition: Offset(event.x.toDouble(), event.y.toDouble()),
-        localPosition: localPosition,
+        globalPosition: position,
+        localPosition: position,
       );
       onTapUp?.call(details);
     }
@@ -86,14 +85,14 @@ class TapGestureRecognizer extends GestureRecognizer {
   }
 
   @override
-  void handlePointerMove(MouseEvent event, Offset localPosition) {
+  void handlePointerMove(Offset position) {
     if (_downPosition == null) {
       return;
     }
 
     // Check if moved too far from initial position
-    final dx = (localPosition.dx - _downPosition!.dx).abs();
-    final dy = (localPosition.dy - _downPosition!.dy).abs();
+    final dx = (position.dx - _downPosition!.dx).abs();
+    final dy = (position.dy - _downPosition!.dy).abs();
 
     if (dx > _kTouchSlop || dy > _kTouchSlop) {
       // Moved too far, cancel
@@ -169,10 +168,10 @@ class DoubleTapGestureRecognizer extends GestureRecognizer {
   static const double _kDoubleTapSlop = 2.0; // cells
 
   @override
-  void handlePointerDown(MouseEvent event, Offset localPosition) {
+  void handlePointerDown(Offset position) {
     if (_tapCount == 0) {
       // First tap
-      _firstTapPosition = localPosition;
+      _firstTapPosition = position;
       _tapCount = 1;
 
       // Start timer for double tap window
@@ -183,8 +182,8 @@ class DoubleTapGestureRecognizer extends GestureRecognizer {
     } else if (_tapCount == 1) {
       // Second tap - check if it's close enough to first tap
       if (_firstTapPosition != null) {
-        final dx = (localPosition.dx - _firstTapPosition!.dx).abs();
-        final dy = (localPosition.dy - _firstTapPosition!.dy).abs();
+        final dx = (position.dx - _firstTapPosition!.dx).abs();
+        final dy = (position.dy - _firstTapPosition!.dy).abs();
 
         if (dx <= _kDoubleTapSlop && dy <= _kDoubleTapSlop) {
           // Valid double tap!
@@ -193,7 +192,7 @@ class DoubleTapGestureRecognizer extends GestureRecognizer {
           _reset();
         } else {
           // Too far apart, start over
-          _firstTapPosition = localPosition;
+          _firstTapPosition = position;
           _tapCount = 1;
           _doubleTapTimer?.cancel();
           _doubleTapTimer = Timer(_doubleTapTimeout, () {
@@ -205,12 +204,12 @@ class DoubleTapGestureRecognizer extends GestureRecognizer {
   }
 
   @override
-  void handlePointerUp(MouseEvent event, Offset localPosition) {
+  void handlePointerUp(Offset position) {
     // Nothing to do on pointer up for double tap
   }
 
   @override
-  void handlePointerMove(MouseEvent event, Offset localPosition) {
+  void handlePointerMove(Offset position) {
     // Movement doesn't affect double tap
   }
 

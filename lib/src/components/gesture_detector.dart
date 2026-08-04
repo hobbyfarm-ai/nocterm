@@ -1,10 +1,10 @@
 import '../framework/framework.dart';
-import '../keyboard/mouse_event.dart';
 import '../gestures/events.dart';
 import '../gestures/hit_test.dart';
 import '../gestures/tap.dart';
 import '../gestures/long_press.dart';
 import '../rendering/mouse_tracker.dart';
+import '../rendering/pointer_gesture.dart';
 import 'package:nocterm/src/rendering/mouse_region.dart';
 
 /// A widget that detects gestures.
@@ -145,32 +145,28 @@ class _GestureDetectorState extends State<GestureDetector> {
     }
   }
 
-  void _handlePointerDown(MouseEvent event) {
-    // Convert global position to local
-    final localPosition = Offset(event.x.toDouble(), event.y.toDouble());
-
-    // Add pointer to recognizers
-    _tapRecognizer?.addPointer(event, localPosition);
-    _doubleTapRecognizer?.addPointer(event, localPosition);
-    _longPressRecognizer?.addPointer(event, localPosition);
+  void _handlePointerDown(Offset position) {
+    _tapRecognizer?.addPointer(position);
+    _doubleTapRecognizer?.addPointer(position);
+    _longPressRecognizer?.addPointer(position);
   }
 
-  void _handlePointerUp(MouseEvent event) {
-    final localPosition = Offset(event.x.toDouble(), event.y.toDouble());
-
-    // Notify recognizers
-    _tapRecognizer?.handlePointerUp(event, localPosition);
-    _doubleTapRecognizer?.handlePointerUp(event, localPosition);
-    _longPressRecognizer?.handlePointerUp(event, localPosition);
+  void _handlePointerUp(Offset position) {
+    _tapRecognizer?.handlePointerUp(position);
+    _doubleTapRecognizer?.handlePointerUp(position);
+    _longPressRecognizer?.handlePointerUp(position);
   }
 
-  void _handlePointerMove(MouseEvent event) {
-    final localPosition = Offset(event.x.toDouble(), event.y.toDouble());
+  void _handlePointerMove(Offset position) {
+    _tapRecognizer?.handlePointerMove(position);
+    _doubleTapRecognizer?.handlePointerMove(position);
+    _longPressRecognizer?.handlePointerMove(position);
+  }
 
-    // Notify recognizers
-    _tapRecognizer?.handlePointerMove(event, localPosition);
-    _doubleTapRecognizer?.handlePointerMove(event, localPosition);
-    _longPressRecognizer?.handlePointerMove(event, localPosition);
+  void _handlePointerCancel() {
+    _tapRecognizer?.rejectGesture();
+    _doubleTapRecognizer?.rejectGesture();
+    _longPressRecognizer?.rejectGesture();
   }
 
   @override
@@ -180,6 +176,7 @@ class _GestureDetectorState extends State<GestureDetector> {
       onPointerDown: _handlePointerDown,
       onPointerUp: _handlePointerUp,
       onPointerMove: _handlePointerMove,
+      onPointerCancel: _handlePointerCancel,
       behavior: component.behavior,
       child: component.child,
     );
@@ -192,13 +189,15 @@ class _GestureDetectorMouseRegion extends SingleChildRenderObjectComponent {
     required this.onPointerDown,
     required this.onPointerUp,
     required this.onPointerMove,
+    required this.onPointerCancel,
     required this.behavior,
     super.child,
   });
 
-  final void Function(MouseEvent) onPointerDown;
-  final void Function(MouseEvent) onPointerUp;
-  final void Function(MouseEvent) onPointerMove;
+  final void Function(Offset) onPointerDown;
+  final void Function(Offset) onPointerUp;
+  final void Function(Offset) onPointerMove;
+  final void Function() onPointerCancel;
   final HitTestBehavior behavior;
 
   @override
@@ -207,6 +206,7 @@ class _GestureDetectorMouseRegion extends SingleChildRenderObjectComponent {
       onPointerDown: onPointerDown,
       onPointerUp: onPointerUp,
       onPointerMove: onPointerMove,
+      onPointerCancel: onPointerCancel,
       behavior: behavior,
     );
   }
@@ -218,6 +218,7 @@ class _GestureDetectorMouseRegion extends SingleChildRenderObjectComponent {
       ..onPointerDown = onPointerDown
       ..onPointerUp = onPointerUp
       ..onPointerMove = onPointerMove
+      ..onPointerCancel = onPointerCancel
       ..behavior = behavior;
   }
 }
@@ -225,13 +226,15 @@ class _GestureDetectorMouseRegion extends SingleChildRenderObjectComponent {
 /// Render object for GestureDetector that tracks mouse events.
 class _RenderGestureDetector extends RenderMouseRegion {
   _RenderGestureDetector({
-    required void Function(MouseEvent) onPointerDown,
-    required void Function(MouseEvent) onPointerUp,
-    required void Function(MouseEvent) onPointerMove,
+    required void Function(Offset) onPointerDown,
+    required void Function(Offset) onPointerUp,
+    required void Function(Offset) onPointerMove,
+    required void Function() onPointerCancel,
     required HitTestBehavior behavior,
   })  : _onPointerDown = onPointerDown,
         _onPointerUp = onPointerUp,
         _onPointerMove = onPointerMove,
+        _onPointerCancel = onPointerCancel,
         _behavior = behavior,
         super(
           onEnter: null,
@@ -240,27 +243,35 @@ class _RenderGestureDetector extends RenderMouseRegion {
           opaque: behavior == HitTestBehavior.opaque,
         );
 
-  void Function(MouseEvent) _onPointerDown;
-  void Function(MouseEvent) get onPointerDown => _onPointerDown;
-  set onPointerDown(void Function(MouseEvent) value) {
+  void Function(Offset) _onPointerDown;
+  void Function(Offset) get onPointerDown => _onPointerDown;
+  set onPointerDown(void Function(Offset) value) {
     if (_onPointerDown == value) return;
     _onPointerDown = value;
     _updateGestureAnnotation();
   }
 
-  void Function(MouseEvent) _onPointerUp;
-  void Function(MouseEvent) get onPointerUp => _onPointerUp;
-  set onPointerUp(void Function(MouseEvent) value) {
+  void Function(Offset) _onPointerUp;
+  void Function(Offset) get onPointerUp => _onPointerUp;
+  set onPointerUp(void Function(Offset) value) {
     if (_onPointerUp == value) return;
     _onPointerUp = value;
     _updateGestureAnnotation();
   }
 
-  void Function(MouseEvent) _onPointerMove;
-  void Function(MouseEvent) get onPointerMove => _onPointerMove;
-  set onPointerMove(void Function(MouseEvent) value) {
+  void Function(Offset) _onPointerMove;
+  void Function(Offset) get onPointerMove => _onPointerMove;
+  set onPointerMove(void Function(Offset) value) {
     if (_onPointerMove == value) return;
     _onPointerMove = value;
+    _updateGestureAnnotation();
+  }
+
+  void Function() _onPointerCancel;
+  void Function() get onPointerCancel => _onPointerCancel;
+  set onPointerCancel(void Function() value) {
+    if (_onPointerCancel == value) return;
+    _onPointerCancel = value;
     _updateGestureAnnotation();
   }
 
@@ -276,65 +287,18 @@ class _RenderGestureDetector extends RenderMouseRegion {
   // Store gesture detector annotation separately from mouse region annotation
   MouseTrackerAnnotation? _gestureAnnotation;
 
-  // Track button press state to detect state transitions
-  bool _isLeftButtonPressed = false;
-
   @override
   MouseTrackerAnnotation? get annotation =>
       _gestureAnnotation ?? super.annotation;
 
   void _updateGestureAnnotation() {
     _gestureAnnotation = MouseTrackerAnnotation(
-      onEnter: (event) {
-        // When entering, sync our state with the current button state
-        // but don't trigger pointer down unless button is pressed during entry
-        if (event.button == MouseButton.left) {
-          final leftDown = event.pressed || event.isPrimaryButtonDown;
-          if (leftDown && !_isLeftButtonPressed) {
-            // Button is pressed as we enter - treat as new press
-            _isLeftButtonPressed = true;
-            _onPointerDown(event);
-          } else if (!leftDown) {
-            // Button not pressed, ensure state is clean
-            _isLeftButtonPressed = false;
-          }
-        }
-      },
-      onExit: (event) {
-        // When exiting, if button was pressed inside and is now released,
-        // we should complete the gesture
-        final leftDown = event.pressed || event.isPrimaryButtonDown;
-        if (!leftDown &&
-            _isLeftButtonPressed &&
-            event.button == MouseButton.left) {
-          _isLeftButtonPressed = false;
-          _onPointerUp(event);
-        }
-        // Reset state when leaving region to prevent stuck buttons
-        // This handles the case where button is still pressed when we exit
-        _isLeftButtonPressed = false;
-      },
-      onHover: (event) {
-        // Handle move events for gesture recognizers
-        if (event.button != MouseButton.wheelUp &&
-            event.button != MouseButton.wheelDown) {
-          _onPointerMove(event);
-        }
-
-        // Detect button state transitions (pressed -> not pressed, or vice versa)
-        // This works regardless of the isMotion flag by tracking actual state changes
-        if (event.button == MouseButton.left) {
-          final leftDown = event.pressed || event.isPrimaryButtonDown;
-          if (leftDown && !_isLeftButtonPressed) {
-            // Button was just pressed while hovering
-            _isLeftButtonPressed = true;
-            _onPointerDown(event);
-          } else if (!leftDown && _isLeftButtonPressed) {
-            // Button was just released while hovering
-            _isLeftButtonPressed = false;
-            _onPointerUp(event);
-          }
-        }
+      dragPolicy: DragPolicy.cancel,
+      onGesture: (update) => switch (update) {
+        GestureBegan(:final anchor) => _onPointerDown(anchor),
+        GestureDragged(:final position) => _onPointerMove(position),
+        GestureEnded(:final position) => _onPointerUp(position),
+        GestureCancelled() => _onPointerCancel(),
       },
       renderObject: this,
     );
