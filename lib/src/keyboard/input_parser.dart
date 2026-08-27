@@ -293,11 +293,26 @@ class InputParser {
           modifiers: const ModifierKeys(shift: true),
         ));
         return;
+      case 0x52: // R — cursor position report (DSR reply)
+        final report = _decodeCursorPositionReport(params);
+        if (report != null) _events.add(report);
+        return;
       default:
-        // Focus events (I/O), cursor position reports (R), and anything
-        // else we don't map: consumed, no event, never a stall.
+        // Focus events (I/O) and anything else we don't map: consumed,
+        // no event, never a stall.
         return;
     }
+  }
+
+  CursorPositionReport? _decodeCursorPositionReport(String params) {
+    // Standard DSR reply is "row;col"; DECXCPR prefixes a '?'.
+    final body = params.startsWith('?') ? params.substring(1) : params;
+    final parts = body.split(';');
+    if (parts.length != 2) return null;
+    final row = int.tryParse(parts[0]);
+    final col = int.tryParse(parts[1]);
+    if (row == null || col == null) return null;
+    return CursorPositionReport(row, col);
   }
 
   KeyboardEvent? _decodeCursorKey(String params, int finalByte) {

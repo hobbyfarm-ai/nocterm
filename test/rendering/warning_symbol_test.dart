@@ -21,9 +21,9 @@ void main() {
   test('various symbols in Miscellaneous Symbols range', () {
     final symbols = {
       '⚠': 1, // U+26A0 Warning sign (text symbol)
-      '☀': 2, // U+2600 Sun (emoji)
-      '☁': 2, // U+2601 Cloud (emoji)
-      '☂': 2, // U+2602 Umbrella (emoji presentation by default)
+      '☀': 1, // U+2600 Sun (text presentation without VS16)
+      '☁': 1, // U+2601 Cloud (text presentation without VS16)
+      '☂': 1, // U+2602 Umbrella (text presentation without VS16)
       '☎': 1, // U+260E Telephone (text symbol)
       '☑': 1, // U+2611 Ballot box with check (text symbol)
       '☒': 1, // U+2612 Ballot box with X (text symbol)

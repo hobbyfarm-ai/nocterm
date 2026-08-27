@@ -12,6 +12,8 @@ class Cell {
   /// Computed lazily on first access to avoid expensive width calculations.
   int? _cachedWidth;
 
+  bool? _cachedMultiCodePoint;
+
   /// Whether this cell is a placeholder for a sixel image.
   ///
   /// When true, the cell should not be rendered as text - instead, the
@@ -29,6 +31,11 @@ class Cell {
   int get width {
     _cachedWidth ??= UnicodeWidth.graphemeWidth(char);
     return _cachedWidth!;
+  }
+
+  /// True when the character spans more than one code point.
+  bool get isMultiCodePoint {
+    return _cachedMultiCodePoint ??= char.runes.length > 1;
   }
 
   Cell copyWith({String? char, TextStyle? style, bool? isImagePlaceholder}) {
@@ -124,16 +131,18 @@ class Buffer {
       // Skip zero-width characters
       if (charWidth == 0) continue;
 
-      // Check if we have enough space for wide characters
-      if (charWidth == 2 && currentX + 1 >= width) break;
+      // Check if the whole cluster fits before the right edge.
+      if (charWidth >= 2 && currentX + charWidth - 1 >= width) break;
 
       if (y >= 0 && y < height && currentX >= 0) {
         cells[y][currentX] = Cell(char: grapheme, style: style);
 
-        // For wide characters, mark the next cell as occupied
-        if (charWidth == 2 && currentX + 1 < width) {
-          cells[y][currentX + 1] =
-              Cell(char: '\u200B', style: style); // Zero-width space marker
+        // Mark the trailing columns of a wide cluster as occupied.
+        for (var offset = 1; offset < charWidth; offset++) {
+          if (currentX + offset < width) {
+            cells[y][currentX + offset] =
+                Cell(char: '\u200B', style: style); // Zero-width space marker
+          }
         }
       }
 

@@ -26,3 +26,12 @@ class PasteInputEvent extends InputEvent {
 
   const PasteInputEvent(this.text);
 }
+
+/// Cursor position report (reply to a DSR `CSI 6n` query): `CSI row;col R`.
+/// Rows and columns are 1-based, as the terminal reports them.
+class CursorPositionReport extends InputEvent {
+  final int row;
+  final int col;
+
+  const CursorPositionReport(this.row, this.col);
+}

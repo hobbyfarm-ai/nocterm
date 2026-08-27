@@ -21,18 +21,19 @@ void main() {
         '♣': 'Black club suit',
         '♥': 'Black heart suit',
         '♦': 'Black diamond suit',
+        '☀': 'Sun (text presentation without VS16)',
+        '☁': 'Cloud (text presentation without VS16)',
+        '☂': 'Umbrella (text presentation without VS16)',
       };
 
-      // Emoji symbols - should be width 2
+      // Emoji symbols (Emoji_Presentation) - should be width 2
       final emojiSymbols = {
         '✅': 'Check mark button (emoji)',
         '❌': 'Cross mark (emoji)',
         '❎': 'Cross mark button (emoji)',
         '✨': 'Sparkles',
         '⭐': 'Star (emoji)',
-        '☀': 'Sun',
-        '☁': 'Cloud',
-        '☂': 'Umbrella',
+        '☀️': 'Sun (VS16 emoji presentation)',
         '⚡': 'High voltage',
         '⚽': 'Soccer ball',
         '⛄': 'Snowman',

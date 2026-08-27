@@ -45,6 +45,14 @@ class TerminalBinding extends NoctermBinding
   );
   final _mouseEventController = StreamController<MouseEvent>.broadcast();
 
+  /// Cursor position reports (DSR replies), used by the startup width probe.
+  final _cursorPositionController =
+      StreamController<CursorPositionReport>.broadcast();
+
+  /// Stream of cursor position reports parsed from terminal input.
+  Stream<CursorPositionReport> get cursorPositionReports =>
+      _cursorPositionController.stream;
+
   /// Pending timer that fires if the parser holds a lone ESC byte and no
   /// follow-up arrives. Cancelled at the top of every input batch.
   Timer? _loneEscapeTimer;
@@ -326,6 +334,8 @@ class TerminalBinding extends NoctermBinding
           );
           _keyboardEventController.add(pasteEvent);
           _routeKeyboardEvent(pasteEvent);
+        } else if (event is CursorPositionReport) {
+          _cursorPositionController.add(event);
         }
       }
 
@@ -601,6 +611,9 @@ class TerminalBinding extends NoctermBinding
       _mouseEventController.close();
     } catch (_) {}
     try {
+      _cursorPositionController.close();
+    } catch (_) {}
+    try {
       _eventLoopController.close();
     } catch (_) {}
     try {
@@ -766,6 +779,9 @@ class TerminalBinding extends NoctermBinding
     } catch (_) {}
     try {
       _mouseEventController.close();
+    } catch (_) {}
+    try {
+      _cursorPositionController.close();
     } catch (_) {}
 
     // Wake up event loop one last time before closing
@@ -967,6 +983,11 @@ class TerminalBinding extends NoctermBinding
       var inRun = false;
       var runEndX = 0;
 
+      // Once a multi-codepoint cluster changes on this row, terminals may
+      // have advanced the cursor unpredictably and spilled overflow into
+      // cells to its right. Repaint the rest of the row to scrub them.
+      var repaintRestOfRow = false;
+
       for (int x = 0; x < buffer.width; x++) {
         final cell = buffer.getCell(x, y);
         final prevCell = previous.getCell(x, y);
@@ -986,7 +1007,7 @@ class TerminalBinding extends NoctermBinding
           continue;
         }
 
-        if (cell == prevCell) {
+        if (cell == prevCell && !repaintRestOfRow) {
           inRun = false;
           continue;
         }
@@ -1019,6 +1040,14 @@ class TerminalBinding extends NoctermBinding
 
         terminal.write(cell.char);
         runEndX += cell.width;
+
+        // Don't trust the cursor advance through a multi-codepoint cluster:
+        // force an absolute reposition before the next write, and scrub the
+        // rest of the row.
+        if (cell.isMultiCodePoint) {
+          inRun = false;
+          repaintRestOfRow = true;
+        }
       }
     }
 
@@ -1050,10 +1079,14 @@ class TerminalBinding extends NoctermBinding
     // Clear the screen first to remove any artifacts from previous renders
     // (especially important when terminal size shrinks)
     terminal.write(EscapeCodes.clearScreen);
-    terminal.moveTo(0, 0);
     TextStyle? currentStyle;
 
     for (int y = 0; y < buffer.height; y++) {
+      // Position each row absolutely rather than trusting newline / auto-wrap
+      // advance, which shears the frame when the terminal's cursor movement
+      // disagrees with our width model.
+      terminal.moveCursor(0, y);
+
       for (int x = 0; x < buffer.width; x++) {
         final cell = buffer.getCell(x, y);
 
@@ -1097,9 +1130,12 @@ class TerminalBinding extends NoctermBinding
           }
           terminal.write(cell.char);
         }
-      }
-      if (y < buffer.height - 1) {
-        terminal.write('\n');
+
+        // Resync after a multi-codepoint cluster the terminal may advance
+        // through differently than our width model.
+        if (cell.isMultiCodePoint) {
+          terminal.moveCursor(x + cell.width, y);
+        }
       }
     }
 

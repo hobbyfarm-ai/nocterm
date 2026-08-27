@@ -6,6 +6,7 @@ import 'package:nocterm/nocterm.dart'
 import 'package:nocterm/src/backend/socket_backend.dart';
 import 'package:nocterm/src/backend/stdio_backend.dart';
 import 'package:nocterm/src/backend/terminal.dart' as term;
+import 'package:nocterm/src/binding/width_probe.dart';
 
 (File?, bool) _useShellMode() {
 // Check for shell mode
@@ -91,6 +92,17 @@ Future<void> _runApp(
 
         binding!.initialize();
         binding!.attachRootComponent(app);
+
+        // Detect the terminal's grapheme-width behavior before the first
+        // frame.
+        if (!isShellMode && stdout.hasTerminal && stdin.hasTerminal) {
+          try {
+            await detectWidthMethod(
+              terminal: terminal,
+              reports: binding!.cursorPositionReports,
+            );
+          } catch (_) {}
+        }
 
         if (enableHotReload && !bool.fromEnvironment('dart.vm.product')) {
           await binding!.initializeHotReload();

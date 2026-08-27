@@ -23,8 +23,9 @@ void main() {
         '⭐': 2, // Star
         '💫': 2, // Dizzy
         '🌟': 2, // Glowing star
-        '☀': 2, // Sun
-        '☁': 2, // Cloud
+        '☀': 1, // Sun (text presentation without VS16)
+        '☁': 1, // Cloud (text presentation without VS16)
+        '☀️': 2, // Sun (VS16 emoji presentation)
         '🚀': 2, // Rocket
         '💻': 2, // Computer
         '🎯': 2, // Target

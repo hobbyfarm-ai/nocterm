@@ -101,8 +101,8 @@ class TerminalCanvas {
         continue;
       }
 
-      // Check if we have enough space for wide characters
-      if (width == 2 && currentColumn + 1 >= area.width) {
+      // Check if the whole cluster fits before the right edge.
+      if (width >= 2 && currentColumn + width - 1 >= area.width) {
         break;
       }
 
@@ -124,15 +124,11 @@ class TerminalCanvas {
         ),
       );
 
-      // For wide characters, we need to mark the next cell as occupied
-      // but without rendering anything there (the terminal handles the width)
-      if (width == 2 && currentColumn + 1 < area.width) {
-        // Mark the cell as occupied by the emoji's second half
-        // We use a special marker that won't be rendered
-        final nextCellX = area.left.round() + currentColumn + 1;
+      // Mark the trailing columns of a wide cluster as occupied.
+      for (var offset = 1; offset < width; offset++) {
+        final nextCellX = area.left.round() + currentColumn + offset;
         final nextCellY = area.top.round() + y;
 
-        // Get existing cell and blend style (handles alpha + background preservation)
         final nextExistingCell = _buffer.getCell(nextCellX, nextCellY);
         final nextEffectiveStyle = style ?? const TextStyle();
         final nextFinalStyle =
