@@ -64,6 +64,13 @@ class WebBackend implements TerminalBackend {
   Stream<void>? get writeDrainedStream => null;
 
   @override
+  Future<void> drainOutput([
+    Duration timeout = const Duration(seconds: 1),
+  ]) async {
+    throw UnsupportedError('WebBackend is only available on web platforms');
+  }
+
+  @override
   void writeRaw(String data) {
     throw UnsupportedError('WebBackend is only available on web platforms');
   }

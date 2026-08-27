@@ -37,6 +37,12 @@ abstract class TerminalBackend {
   /// Returns null when writes complete synchronously (nothing to wait for).
   Stream<void>? get writeDrainedStream => null;
 
+  /// Waits until previously submitted output has reached the terminal,
+  /// bounded by [timeout].
+  Future<void> drainOutput([
+    Duration timeout = const Duration(seconds: 1),
+  ]) async {}
+
   /// Get the current terminal size.
   Size getSize();
 

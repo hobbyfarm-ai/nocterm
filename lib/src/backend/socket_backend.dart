@@ -25,6 +25,18 @@ class SocketBackend implements TerminalBackend {
   Stream<void>? get writeDrainedStream => null;
 
   @override
+  Future<void> drainOutput([
+    Duration timeout = const Duration(seconds: 1),
+  ]) async {
+    if (_disposed) return;
+    try {
+      await _socket.flush().timeout(timeout);
+    } catch (_) {
+      // A stalled or closed peer just ends the bounded wait early.
+    }
+  }
+
+  @override
   void writeRaw(String data) {
     if (!_disposed) {
       _socket.write(data);

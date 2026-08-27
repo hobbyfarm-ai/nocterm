@@ -313,6 +313,11 @@ class _MockBackend implements TerminalBackend {
   _MockBackend(this._size);
 
   @override
+  Future<void> drainOutput([
+    Duration timeout = const Duration(seconds: 1),
+  ]) async {}
+
+  @override
   void writeRaw(String data) {}
 
   @override

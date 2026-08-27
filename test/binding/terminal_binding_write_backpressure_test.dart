@@ -7,6 +7,11 @@ import 'package:nocterm/src/backend/terminal.dart' as term;
 import 'package:test/test.dart' hide isEmpty, isNotEmpty;
 
 class _FakeBackend implements TerminalBackend {
+  @override
+  Future<void> drainOutput([
+    Duration timeout = const Duration(seconds: 1),
+  ]) async {}
+
   bool inFlight = false;
   final drainedController = StreamController<void>.broadcast();
   final writes = <Uint8List>[];

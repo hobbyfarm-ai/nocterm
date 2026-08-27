@@ -30,6 +30,14 @@ class SocketBackend implements TerminalBackend {
   Stream<void>? get writeDrainedStream => null;
 
   @override
+  Future<void> drainOutput([
+    Duration timeout = const Duration(seconds: 1),
+  ]) async {
+    throw UnsupportedError(
+        'SocketBackend is only available on native platforms');
+  }
+
+  @override
   void writeRaw(String data) {
     throw UnsupportedError(
         'SocketBackend is only available on native platforms');

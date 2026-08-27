@@ -67,6 +67,13 @@ Future<void> _runApp(
   TerminalBinding? binding;
   LogServer? logServer;
   Logger? logger;
+  Object? fatalError;
+  StackTrace? fatalStackTrace;
+
+  void recordFatal(Object error, StackTrace stackTrace) {
+    fatalError ??= error;
+    fatalStackTrace ??= stackTrace;
+  }
 
   try {
     logServer = LogServer();
@@ -78,17 +85,21 @@ Future<void> _runApp(
     }
 
     await runZoned(() async {
-      final terminal = term.Terminal(backend);
-      binding = TerminalBinding(terminal);
+      try {
+        final terminal = term.Terminal(backend);
+        binding = TerminalBinding(terminal);
 
-      binding!.initialize();
-      binding!.attachRootComponent(app);
+        binding!.initialize();
+        binding!.attachRootComponent(app);
 
-      if (enableHotReload && !bool.fromEnvironment('dart.vm.product')) {
-        await binding!.initializeHotReload();
+        if (enableHotReload && !bool.fromEnvironment('dart.vm.product')) {
+          await binding!.initializeHotReload();
+        }
+
+        await binding!.runEventLoop();
+      } catch (error, stackTrace) {
+        recordFatal(error, stackTrace);
       }
-
-      await binding!.runEventLoop();
     },
         zoneSpecification: ZoneSpecification(
           print: (Zone self, ZoneDelegate parent, Zone zone, String message) {
@@ -106,10 +117,8 @@ Future<void> _runApp(
             }
           },
         ));
-  } catch (e) {
-    if (isShellMode) {
-      stderr.writeln('Shell mode error: $e');
-    }
+  } catch (error, stackTrace) {
+    recordFatal(error, stackTrace);
   } finally {
     if (binding != null && !binding!.shouldExit) {
       binding!.shutdown();
@@ -118,5 +127,20 @@ Future<void> _runApp(
       await logger?.close();
       await logServer?.close();
     } catch (_) {}
+  }
+
+  final error = fatalError;
+  if (error != null) {
+    final stackTrace = fatalStackTrace ?? StackTrace.empty;
+    final report = 'Unhandled error: $error\n$stackTrace\n';
+    if (backend.isAvailable) {
+      backend.writeRaw(report);
+    }
+    stderr.write(report);
+    await backend.drainOutput();
+    try {
+      await stderr.flush();
+    } catch (_) {}
+    Error.throwWithStackTrace(error, stackTrace);
   }
 }

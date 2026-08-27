@@ -154,6 +154,18 @@ class StdioBackend implements TerminalBackend {
   Stream<void>? get writeDrainedStream => _writer?.drained;
 
   @override
+  Future<void> drainOutput([
+    Duration timeout = const Duration(seconds: 1),
+  ]) async {
+    await _writer?.waitForDrain(timeout);
+    try {
+      await stdout.flush();
+    } catch (_) {
+      // Stdout may already be closed (piped output, teardown races).
+    }
+  }
+
+  @override
   void writeRawBytes(Uint8List bytes) {
     if (bytes.isEmpty) return;
     final writer = _writer;
@@ -265,8 +277,8 @@ class StdioBackend implements TerminalBackend {
     // alt screen). The drain is time-boxed so a wedged terminal can't hold
     // the process hostage. See: https://github.com/Norbert515/nocterm/issues/57
     Future(() async {
-      await _writer?.waitForDrain(const Duration(seconds: 1));
-      await Future.wait<void>([stdout.flush(), stderr.flush()]);
+      await drainOutput();
+      await stderr.flush();
     }).then((_) => exit(exitCode)).catchError((_) => exit(exitCode));
   }
 

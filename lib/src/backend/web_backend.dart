@@ -249,6 +249,11 @@ class WebBackend implements TerminalBackend {
   Stream<void>? get writeDrainedStream => null;
 
   @override
+  Future<void> drainOutput([
+    Duration timeout = const Duration(seconds: 1),
+  ]) async {}
+
+  @override
   void writeRaw(String data) {
     if (_disposed) return;
 
