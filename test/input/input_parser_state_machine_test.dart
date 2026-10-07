@@ -95,8 +95,8 @@ void main() {
       final parser = InputParser()
         ..addBytes([0x1b, 0x41, ...utf8.encode('\x1b[<0;3;4M')]);
       final events = drain(parser);
-      expect(events[0], contains('escape'));
-      expect(events[1], contains('keyA'));
+      expect(events, hasLength(2));
+      expect(events[0], equals('key:keyA:A:truetruefalse')); // alt+shift+a
       expect(events.last, startsWith('mouse:MouseButton.left:2,3:true'));
     });
 
@@ -113,8 +113,8 @@ void main() {
       final parser = InputParser()..addBytes([0x1b]);
       expect(parser.parseNext(), isNull);
       expect(parser.hasPendingLoneEscape, isTrue);
-      final escape = parser.flushLoneEscape();
-      expect(escape?.logicalKey, equals(LogicalKey.escape));
+      final escapes = parser.flushLoneEscape();
+      expect(escapes.map((e) => e.logicalKey), equals([LogicalKey.escape]));
       expect(parser.hasPendingLoneEscape, isFalse);
     });
 

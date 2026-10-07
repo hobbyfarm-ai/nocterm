@@ -403,23 +403,32 @@ class _TextFieldState extends State<TextField> {
       component.onEditingComplete?.call();
       component.onSubmitted?.call(_controller.text);
       return true;
+    } else if (key == LogicalKey.backspace && _hasWordModifier(event)) {
+      _deleteWordBackward();
+      return true;
+    } else if (key == LogicalKey.delete && _hasWordModifier(event)) {
+      _deleteWordForward();
+      return true;
+    } else if (event.matches(LogicalKey.keyD, alt: true, ctrl: false)) {
+      _deleteWordForward();
+      return true;
     } else if (key == LogicalKey.backspace) {
       _handleBackspace();
       return true;
     } else if (key == LogicalKey.delete) {
       _handleDelete();
       return true;
+    } else if (_isWordJump(event, LogicalKey.arrowLeft, LogicalKey.keyB)) {
+      _moveCursorByWord(-1, event.isShiftPressed);
+      return true;
+    } else if (_isWordJump(event, LogicalKey.arrowRight, LogicalKey.keyF)) {
+      _moveCursorByWord(1, event.isShiftPressed);
+      return true;
     } else if (key == LogicalKey.arrowLeft && event.isShiftPressed) {
       _moveCursor(-1, true);
       return true;
     } else if (key == LogicalKey.arrowRight && event.isShiftPressed) {
       _moveCursor(1, true);
-      return true;
-    } else if (key == LogicalKey.arrowLeft && event.isControlPressed) {
-      _moveCursorByWord(-1, false);
-      return true;
-    } else if (key == LogicalKey.arrowRight && event.isControlPressed) {
-      _moveCursorByWord(1, false);
       return true;
     } else if (key == LogicalKey.arrowUp &&
         event.isShiftPressed &&
@@ -460,12 +469,6 @@ class _TextFieldState extends State<TextField> {
       return true;
     } else if (event.matches(LogicalKey.keyV, ctrl: true)) {
       _paste();
-      return true;
-    } else if (key == LogicalKey.backspace && event.isControlPressed) {
-      _deleteWordBackward();
-      return true;
-    } else if (key == LogicalKey.delete && event.isControlPressed) {
-      _deleteWordForward();
       return true;
     } else if (event.matches(LogicalKey.keyT, ctrl: true)) {
       _transposeCharacters();
@@ -667,6 +670,20 @@ class _TextFieldState extends State<TextField> {
     _renderTextField?.moveCursorHorizontally(delta, extendSelection);
   }
 
+  /// Ctrl or Alt (Option on macOS terminals) makes a key act word-wise.
+  static bool _hasWordModifier(KeyboardEvent event) =>
+      event.isControlPressed || event.isAltPressed;
+
+  /// A word jump is a modified [arrow], or the emacs chord [emacsKey]
+  /// (Alt+B / Alt+F) that macOS Terminal sends for Option+arrow.
+  static bool _isWordJump(
+    KeyboardEvent event,
+    LogicalKey arrow,
+    LogicalKey emacsKey,
+  ) =>
+      (event.logicalKey == arrow && _hasWordModifier(event)) ||
+      event.matches(emacsKey, alt: true, ctrl: false);
+
   void _moveCursorByWord(int direction, bool extendSelection) {
     _renderTextField?.moveCursorByWord(direction, extendSelection);
   }
@@ -748,7 +765,8 @@ class _TextFieldState extends State<TextField> {
 
     _controller.text =
         text.substring(0, clampedExtentOffset) + text.substring(end);
-    // Cursor position stays the same
+    _controller.selection =
+        TextSelection.collapsed(offset: clampedExtentOffset);
   }
 
   void _transposeCharacters() {

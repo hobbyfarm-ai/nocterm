@@ -380,11 +380,13 @@ class TerminalBinding extends NoctermBinding
     }
     if (deferred.isNotEmpty) _inputParser.addBytes(deferred);
 
-    final event = _inputParser.flushLoneEscape();
-    if (event == null) return;
-    _keyboardEventController.add(event);
-    if (_handleDebugKeyEvent(event)) return;
-    _routeKeyboardEvent(event);
+    final events = _inputParser.flushLoneEscape();
+    if (events.isEmpty) return;
+    for (final event in events) {
+      _keyboardEventController.add(event);
+      if (_handleDebugKeyEvent(event)) continue;
+      _routeKeyboardEvent(event);
+    }
     if (buildOwner.hasDirtyElements) {
       scheduleFrame();
     }

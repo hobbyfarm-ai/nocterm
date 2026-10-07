@@ -17,6 +17,13 @@ class InputParser {
 
   _ParseState _state = _ParseState.ground;
 
+  /// Set while reading a sequence that followed `ESC ESC`: the terminal sent
+  /// a Meta prefix, so the decoded key carries the Alt modifier. Any byte
+  /// arriving in the ground or escape state means that sequence is over.
+  bool _altPrefix = false;
+
+  static const _escapeKey = KeyboardEvent(logicalKey: LogicalKey.escape);
+
   /// Collected parameter/intermediate bytes of the CSI sequence being read.
   final List<int> _csi = [];
 
@@ -57,24 +64,27 @@ class InputParser {
     _utf8.clear();
     _utf8Expected = 0;
     _paste.clear();
+    _altPrefix = false;
     _state = _ParseState.ground;
   }
 
-  /// True iff the parser is holding a bare `ESC` — either a standalone
-  /// Escape press or the prefix of a sequence whose remainder hasn't
-  /// arrived. The binding disambiguates with a short timeout.
+  /// True iff the parser is holding bare `ESC` byte(s) — standalone Escape
+  /// presses or the prefix of a sequence whose remainder hasn't arrived.
+  /// The binding disambiguates with a short timeout.
   bool get hasPendingLoneEscape =>
-      _state == _ParseState.escape && _events.isEmpty;
+      (_state == _ParseState.escape || _state == _ParseState.metaEscape) &&
+      _events.isEmpty;
 
-  /// Commit the deferred lone ESC as a standalone Escape event.
-  /// Returns null if the parser is no longer holding one.
-  KeyboardEvent? flushLoneEscape() {
-    if (_state != _ParseState.escape) return null;
+  /// Commit the deferred ESC byte(s) as standalone Escape events, one per
+  /// held byte. Returns an empty list if the parser is no longer holding any.
+  List<KeyboardEvent> flushLoneEscape() {
+    final heldEscapes = switch (_state) {
+      _ParseState.escape => 1,
+      _ParseState.metaEscape => 2,
+      _ => 0,
+    };
     _state = _ParseState.ground;
-    return KeyboardEvent(
-      logicalKey: LogicalKey.escape,
-      modifiers: const ModifierKeys(),
-    );
+    return List.filled(heldEscapes, _escapeKey);
   }
 
   // State transitions
@@ -85,6 +95,8 @@ class InputParser {
         _feedGround(b);
       case _ParseState.escape:
         _feedEscape(b);
+      case _ParseState.metaEscape:
+        _feedMetaEscape(b);
       case _ParseState.csi:
         _feedCsi(b);
       case _ParseState.ss3:
@@ -99,6 +111,7 @@ class InputParser {
   }
 
   void _feedGround(int b) {
+    _altPrefix = false;
     if (b == 0x1B) {
       _state = _ParseState.escape;
       return;
@@ -181,6 +194,7 @@ class InputParser {
   }
 
   void _feedEscape(int b) {
+    _altPrefix = false;
     if (b == 0x5B) {
       // CSI
       _csi.clear();
@@ -192,33 +206,44 @@ class InputParser {
       _state = _ParseState.ss3;
       return;
     }
-    if (b >= 0x61 && b <= 0x7A) {
-      // Alt+lowercase letter
-      final char = String.fromCharCode(b);
-      final baseKey =
-          LogicalKey.fromCharacter(char) ?? LogicalKey(b, 'unknown');
+    if (b == 0x1B) {
+      // ESC ESC: either two Escape presses or a Meta prefix on the sequence
+      // that follows. The next byte decides.
+      _state = _ParseState.metaEscape;
+      return;
+    }
+    if (b == 0x7F) {
+      // Alt+Backspace
       _state = _ParseState.ground;
       _emitKey(KeyboardEvent(
-        logicalKey: baseKey,
-        character: char,
+        logicalKey: LogicalKey.backspace,
         modifiers: const ModifierKeys(alt: true),
       ));
       return;
     }
-    if (b == 0x1B) {
-      // ESC ESC: commit the first as Escape, keep holding the second.
-      _emitKey(KeyboardEvent(
-        logicalKey: LogicalKey.escape,
-        modifiers: const ModifierKeys(),
-      ));
+    if (b >= 0x20 && b <= 0x7E) {
+      // Alt+printable character
+      _state = _ParseState.ground;
+      _emitCharacter(String.fromCharCode(b), alt: true);
       return;
     }
     // Anything else: the ESC was a standalone Escape; reprocess this byte.
     _state = _ParseState.ground;
-    _emitKey(KeyboardEvent(
-      logicalKey: LogicalKey.escape,
-      modifiers: const ModifierKeys(),
-    ));
+    _emitKey(_escapeKey);
+    _feed(b);
+  }
+
+  void _feedMetaEscape(int b) {
+    if (b == 0x5B || b == 0x4F) {
+      _altPrefix = true;
+      _csi.clear();
+      _state = b == 0x5B ? _ParseState.csi : _ParseState.ss3;
+      return;
+    }
+    // The first ESC was a standalone Escape; the second may still open a
+    // sequence, so reprocess this byte against it.
+    _emitKey(_escapeKey);
+    _state = _ParseState.escape;
     _feed(b);
   }
 
@@ -357,7 +382,8 @@ class InputParser {
       return;
     }
 
-    if (parts.length != 1) return;
+    // Editing/function keys: keycode ~ or keycode ; modifier ~
+    if (parts.length > 2) return;
     final key = switch (parts[0]) {
       '2' => LogicalKey.insert,
       '3' => LogicalKey.delete,
@@ -373,9 +399,14 @@ class InputParser {
       '24' => LogicalKey.f12,
       _ => null,
     };
-    if (key != null) {
-      _emitKey(KeyboardEvent(logicalKey: key, modifiers: const ModifierKeys()));
+    if (key == null) return;
+    var modifiers = const ModifierKeys();
+    if (parts.length == 2) {
+      final modifierValue = int.tryParse(parts[1]);
+      if (modifierValue == null) return;
+      modifiers = _decodeModifiers(modifierValue);
     }
+    _emitKey(KeyboardEvent(logicalKey: key, modifiers: modifiers));
   }
 
   /// Kitty keyboard protocol: codepoint[:...] ; modifier[:...] u
@@ -405,6 +436,12 @@ class InputParser {
       0x51 => LogicalKey.f2,
       0x52 => LogicalKey.f3,
       0x53 => LogicalKey.f4,
+      0x41 => LogicalKey.arrowUp,
+      0x42 => LogicalKey.arrowDown,
+      0x43 => LogicalKey.arrowRight,
+      0x44 => LogicalKey.arrowLeft,
+      0x48 => LogicalKey.home,
+      0x46 => LogicalKey.end,
       _ => null,
     };
     if (key != null) {
@@ -486,10 +523,16 @@ class InputParser {
   // Event helpers
 
   void _emitKey(KeyboardEvent event) {
-    _events.add(KeyboardInputEvent(event));
+    _events.add(KeyboardInputEvent(_altPrefix ? _withAlt(event) : event));
   }
 
-  void _emitCharacter(String char) {
+  KeyboardEvent _withAlt(KeyboardEvent event) => KeyboardEvent(
+        logicalKey: event.logicalKey,
+        character: event.character,
+        modifiers: event.modifiers.copyWith(alt: true),
+      );
+
+  void _emitCharacter(String char, {bool alt = false}) {
     final key = LogicalKey.fromCharacter(char);
     final code = char.codeUnitAt(0);
     final isUpperCase =
@@ -497,7 +540,7 @@ class InputParser {
     _emitKey(KeyboardEvent(
       logicalKey: key ?? LogicalKey(code, 'unknown'),
       character: char,
-      modifiers: ModifierKeys(shift: isUpperCase),
+      modifiers: ModifierKeys(shift: isUpperCase, alt: alt),
     ));
   }
 
@@ -550,4 +593,4 @@ class InputParser {
   }
 }
 
-enum _ParseState { ground, escape, csi, ss3, x10, utf8, paste }
+enum _ParseState { ground, escape, metaEscape, csi, ss3, x10, utf8, paste }
