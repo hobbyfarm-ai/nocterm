@@ -136,6 +136,7 @@ class TextField extends StatefulComponent {
     this.showCursor = true,
     this.width,
     this.height,
+    this.wordJumpStyle,
   })  : assert(maxLines == null || maxLines > 0),
         assert(minLines == null || minLines > 0),
         assert(
@@ -196,6 +197,10 @@ class TextField extends StatefulComponent {
   final bool showCursor;
   final double? width;
   final double? height;
+
+  /// Where a forward word jump lands. Defaults to the host platform's
+  /// shell convention.
+  final WordJumpStyle? wordJumpStyle;
 
   @override
   State<TextField> createState() => _TextFieldState();
@@ -604,67 +609,54 @@ class _TextFieldState extends State<TextField> {
   }
 
   void _handleBackspace() {
-    final text = _controller.text;
-    final selection = _controller.selection;
-
-    // Clamp selection offsets to valid range to handle race conditions
-    final textLength = text.length;
-    final clampedStart = selection.start.clamp(0, textLength);
-    final clampedEnd = selection.end.clamp(0, textLength);
-    final clampedExtentOffset = selection.extentOffset.clamp(0, textLength);
-    final isCollapsed = clampedStart == clampedEnd;
-
-    if (!isCollapsed) {
-      // Delete selected text
-      _controller.text =
-          text.substring(0, clampedStart) + text.substring(clampedEnd);
-      _controller.selection = TextSelection.collapsed(offset: clampedStart);
-    } else if (clampedExtentOffset > 0) {
-      // Delete the grapheme cluster before cursor
-      final textBefore = text.substring(0, clampedExtentOffset);
-      final textAfter = text.substring(clampedExtentOffset);
-
-      // Use grapheme clusters to delete the entire cluster
-      final graphemes = textBefore.characters;
-      if (graphemes.isNotEmpty) {
-        final newTextBefore = graphemes.skipLast(1).toString();
-        _controller.text = newTextBefore + textAfter;
-        _controller.selection =
-            TextSelection.collapsed(offset: newTextBefore.length);
-      }
-    }
+    if (_deleteSelection()) return;
+    final cursor = _cursor;
+    if (cursor == 0) return;
+    final before = _controller.text.substring(0, cursor).characters;
+    _deleteRange(before.skipLast(1).toString().length, cursor);
   }
 
   void _handleDelete() {
+    if (_deleteSelection()) return;
     final text = _controller.text;
-    final selection = _controller.selection;
-
-    // Clamp selection offsets to valid range to handle race conditions
-    final textLength = text.length;
-    final clampedStart = selection.start.clamp(0, textLength);
-    final clampedEnd = selection.end.clamp(0, textLength);
-    final clampedExtentOffset = selection.extentOffset.clamp(0, textLength);
-    final isCollapsed = clampedStart == clampedEnd;
-
-    if (!isCollapsed) {
-      // Delete selected text
-      _controller.text =
-          text.substring(0, clampedStart) + text.substring(clampedEnd);
-      _controller.selection = TextSelection.collapsed(offset: clampedStart);
-    } else if (clampedExtentOffset < textLength) {
-      // Delete the grapheme cluster after cursor
-      final textBefore = text.substring(0, clampedExtentOffset);
-      final textAfter = text.substring(clampedExtentOffset);
-
-      // Use grapheme clusters to delete the entire cluster
-      final graphemesAfter = textAfter.characters;
-      if (graphemesAfter.isNotEmpty) {
-        final newTextAfter = graphemesAfter.skip(1).toString();
-        _controller.text = textBefore + newTextAfter;
-        // Cursor position stays the same
-      }
-    }
+    final cursor = _cursor;
+    if (cursor >= text.length) return;
+    _deleteRange(
+        cursor, cursor + text.substring(cursor).characters.first.length);
   }
+
+  void _deleteWordBackward() {
+    if (_deleteSelection()) return;
+    _deleteRange(_words.previousStart(_controller.text, _cursor), _cursor);
+  }
+
+  void _deleteWordForward() {
+    if (_deleteSelection()) return;
+    _deleteRange(_cursor, _words.nextStop(_controller.text, _cursor));
+  }
+
+  /// Deletes the selected text; false when the selection is collapsed.
+  bool _deleteSelection() {
+    final selection = _controller.selection;
+    final length = _controller.text.length;
+    final start = selection.start.clamp(0, length);
+    final end = selection.end.clamp(0, length);
+    if (start == end) return false;
+    _deleteRange(start, end);
+    return true;
+  }
+
+  void _deleteRange(int start, int end) {
+    final text = _controller.text;
+    _controller.text = text.substring(0, start) + text.substring(end);
+    _controller.selection = TextSelection.collapsed(offset: start);
+  }
+
+  int get _cursor =>
+      _controller.selection.extentOffset.clamp(0, _controller.text.length);
+
+  WordNavigation get _words =>
+      WordNavigation(component.wordJumpStyle ?? WordJumpStyle.host);
 
   void _moveCursor(int delta, bool extendSelection) {
     _renderTextField?.moveCursorHorizontally(delta, extendSelection);
@@ -686,87 +678,6 @@ class _TextFieldState extends State<TextField> {
 
   void _moveCursorByWord(int direction, bool extendSelection) {
     _renderTextField?.moveCursorByWord(direction, extendSelection);
-  }
-
-  bool _isSpace(String char) {
-    return char == ' ' || char == '\t' || char == '\n' || char == '\r';
-  }
-
-  void _deleteWordBackward() {
-    final text = _controller.text;
-    final selection = _controller.selection;
-
-    // Clamp selection offsets to valid range to handle race conditions
-    final textLength = text.length;
-    final clampedStart = selection.start.clamp(0, textLength);
-    final clampedEnd = selection.end.clamp(0, textLength);
-    final clampedExtentOffset = selection.extentOffset.clamp(0, textLength);
-    final isCollapsed = clampedStart == clampedEnd;
-
-    if (!isCollapsed) {
-      // Delete selected text
-      _controller.text =
-          text.substring(0, clampedStart) + text.substring(clampedEnd);
-      _controller.selection = TextSelection.collapsed(offset: clampedStart);
-      return;
-    }
-
-    if (clampedExtentOffset == 0) return;
-
-    int start = clampedExtentOffset;
-
-    // Skip spaces backward
-    while (start > 0 && _isSpace(text[start - 1])) {
-      start--;
-    }
-
-    // Skip word characters backward
-    while (start > 0 && !_isSpace(text[start - 1])) {
-      start--;
-    }
-
-    _controller.text =
-        text.substring(0, start) + text.substring(clampedExtentOffset);
-    _controller.selection = TextSelection.collapsed(offset: start);
-  }
-
-  void _deleteWordForward() {
-    final text = _controller.text;
-    final selection = _controller.selection;
-
-    // Clamp selection offsets to valid range to handle race conditions
-    final textLength = text.length;
-    final clampedStart = selection.start.clamp(0, textLength);
-    final clampedEnd = selection.end.clamp(0, textLength);
-    final clampedExtentOffset = selection.extentOffset.clamp(0, textLength);
-    final isCollapsed = clampedStart == clampedEnd;
-
-    if (!isCollapsed) {
-      // Delete selected text
-      _controller.text =
-          text.substring(0, clampedStart) + text.substring(clampedEnd);
-      _controller.selection = TextSelection.collapsed(offset: clampedStart);
-      return;
-    }
-
-    if (clampedExtentOffset >= textLength) return;
-
-    int end = clampedExtentOffset;
-
-    // Skip current word forward
-    while (end < textLength && !_isSpace(text[end])) {
-      end++;
-    }
-
-    // Skip spaces forward
-    while (end < textLength && _isSpace(text[end])) {
-      end++;
-    }
-
-    _controller.text =
-        text.substring(0, clampedExtentOffset) + text.substring(end);
-    _controller.selection =
-        TextSelection.collapsed(offset: clampedExtentOffset);
   }
 
   void _transposeCharacters() {
@@ -977,6 +888,7 @@ class _TextFieldState extends State<TextField> {
       isFocused: isFocused, // Pass focus state to render object
       obscureText: component.obscureText,
       obscuringCharacter: component.obscuringCharacter,
+      wordNavigation: _words,
       onSelectionChange: _handleSelectionChangeFromRenderObject,
       onRenderObjectCreate: (renderObject) {
         _renderTextField = renderObject;
@@ -1028,6 +940,7 @@ class _TextFieldContent extends SingleChildRenderObjectComponent {
     required this.isFocused,
     this.obscureText = false,
     this.obscuringCharacter = '•',
+    required this.wordNavigation,
     this.onSelectionChange,
     this.onRenderObjectCreate,
   });
@@ -1048,6 +961,7 @@ class _TextFieldContent extends SingleChildRenderObjectComponent {
   final bool isFocused;
   final bool obscureText;
   final String obscuringCharacter;
+  final WordNavigation wordNavigation;
   final void Function(TextSelection)? onSelectionChange;
   final void Function(RenderTextField)? onRenderObjectCreate;
 
@@ -1070,6 +984,7 @@ class _TextFieldContent extends SingleChildRenderObjectComponent {
       isFocused: isFocused,
       obscureText: obscureText,
       obscuringCharacter: obscuringCharacter,
+      wordNavigation: wordNavigation,
       onSelectionChange: onSelectionChange,
     );
     onRenderObjectCreate?.call(renderObject);
@@ -1094,7 +1009,8 @@ class _TextFieldContent extends SingleChildRenderObjectComponent {
       ..maxLines = maxLines
       ..isFocused = isFocused
       ..obscureText = obscureText
-      ..obscuringCharacter = obscuringCharacter;
+      ..obscuringCharacter = obscuringCharacter
+      ..wordNavigation = wordNavigation;
   }
 }
 
@@ -1117,6 +1033,7 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
     required bool isFocused,
     bool obscureText = false,
     String obscuringCharacter = '•',
+    required WordNavigation wordNavigation,
     this.onSelectionChange,
   })  : _text = text,
         _placeholder = placeholder,
@@ -1133,7 +1050,8 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
         _maxLines = maxLines,
         _isFocused = isFocused,
         _obscureText = obscureText,
-        _obscuringCharacter = obscuringCharacter {
+        _obscuringCharacter = obscuringCharacter,
+        _wordNavigation = wordNavigation {
     _updateMouseAnnotation();
   }
 
@@ -1156,6 +1074,8 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
   bool _isFocused;
   bool _obscureText;
   String _obscuringCharacter;
+  WordNavigation _wordNavigation;
+  set wordNavigation(WordNavigation value) => _wordNavigation = value;
 
   // Callback for selection changes
   final void Function(TextSelection)? onSelectionChange;
@@ -1307,17 +1227,7 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
       direction: direction,
     );
 
-    final newSelection = extendSelection
-        ? _selection.copyWith(extentOffset: newOffset)
-        : TextSelection.collapsed(offset: newOffset);
-
-    if (newSelection != _selection) {
-      _selection = newSelection;
-      _targetVisualColumn = null; // Reset target column
-      _ensureCursorVisible();
-      onSelectionChange?.call(newSelection);
-      markNeedsPaint();
-    }
+    _moveExtentTo(newOffset, extendSelection);
   }
 
   /// Move cursor vertically
@@ -1342,37 +1252,15 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
       targetVisualColumn: _targetVisualColumn!,
     );
 
-    final newSelection = extendSelection
-        ? _selection.copyWith(extentOffset: newOffset)
-        : TextSelection.collapsed(offset: newOffset);
-
-    if (newSelection != _selection) {
-      _selection = newSelection;
-      _ensureCursorVisible();
-      onSelectionChange?.call(newSelection);
-      markNeedsPaint();
-    }
+    _moveExtentTo(newOffset, extendSelection, keepTargetColumn: true);
   }
 
   /// Move cursor by word
   void moveCursorByWord(int direction, bool extendSelection) {
-    final newOffset = CursorMovement.moveCursorByWord(
-      text: _text,
-      currentOffset: _selection.extentOffset,
-      direction: direction,
+    _moveExtentTo(
+      _wordNavigation.jump(_text, _selection.extentOffset, direction),
+      extendSelection,
     );
-
-    final newSelection = extendSelection
-        ? _selection.copyWith(extentOffset: newOffset)
-        : TextSelection.collapsed(offset: newOffset);
-
-    if (newSelection != _selection) {
-      _selection = newSelection;
-      _targetVisualColumn = null; // Reset target column
-      _ensureCursorVisible();
-      onSelectionChange?.call(newSelection);
-      markNeedsPaint();
-    }
   }
 
   /// Move cursor to start of current line
@@ -1385,17 +1273,7 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
       currentOffset: _selection.extentOffset,
     );
 
-    final newSelection = extendSelection
-        ? _selection.copyWith(extentOffset: newOffset)
-        : TextSelection.collapsed(offset: newOffset);
-
-    if (newSelection != _selection) {
-      _selection = newSelection;
-      _targetVisualColumn = null; // Reset target column
-      _ensureCursorVisible();
-      onSelectionChange?.call(newSelection);
-      markNeedsPaint();
-    }
+    _moveExtentTo(newOffset, extendSelection);
   }
 
   /// Move cursor to end of current line
@@ -1408,22 +1286,39 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
       currentOffset: _selection.extentOffset,
     );
 
-    final newSelection = extendSelection
-        ? _selection.copyWith(extentOffset: newOffset)
-        : TextSelection.collapsed(offset: newOffset);
-
-    if (newSelection != _selection) {
-      _selection = newSelection;
-      _targetVisualColumn = null; // Reset target column
-      _ensureCursorVisible();
-      onSelectionChange?.call(newSelection);
-      markNeedsPaint();
-    }
+    _moveExtentTo(newOffset, extendSelection);
   }
 
   /// Reset target visual column (used when text changes)
   void resetTargetColumn() {
     _targetVisualColumn = null;
+  }
+
+  /// Moves the selection extent to [offset], collapsing unless extending.
+  void _moveExtentTo(
+    int offset,
+    bool extendSelection, {
+    bool keepTargetColumn = false,
+  }) {
+    _commitSelection(
+      extendSelection
+          ? _selection.copyWith(extentOffset: offset)
+          : TextSelection.collapsed(offset: offset),
+      keepTargetColumn: keepTargetColumn,
+    );
+  }
+
+  /// Applies [selection], scrolls the cursor into view, and notifies.
+  void _commitSelection(
+    TextSelection selection, {
+    bool keepTargetColumn = false,
+  }) {
+    if (selection == _selection) return;
+    _selection = selection;
+    if (!keepTargetColumn) _targetVisualColumn = null;
+    _ensureCursorVisible();
+    onSelectionChange?.call(selection);
+    markNeedsPaint();
   }
 
   /// Returns the terminal screen coordinates (column, row) of the text cursor,
@@ -1622,13 +1517,7 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
     _dragAnchorOffset = charIndex;
 
     final newSelection = TextSelection.collapsed(offset: charIndex);
-    if (newSelection != _selection) {
-      _selection = newSelection;
-      _targetVisualColumn = null;
-      _ensureCursorVisible();
-      onSelectionChange?.call(newSelection);
-      markNeedsPaint();
-    }
+    _commitSelection(newSelection);
   }
 
   void _handlePointerMove(Offset position) {
@@ -1642,13 +1531,7 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
       extentOffset: charIndex,
     );
 
-    if (newSelection != _selection) {
-      _selection = newSelection;
-      _targetVisualColumn = null;
-      _ensureCursorVisible();
-      onSelectionChange?.call(newSelection);
-      markNeedsPaint();
-    }
+    _commitSelection(newSelection);
   }
 
   void _handlePointerUp(Offset position) {
@@ -1658,77 +1541,11 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
   void _selectWordAt(int offset) {
     if (_text.isEmpty) return;
     final clampedOffset = offset.clamp(0, _text.length - 1);
-
-    int start = clampedOffset;
-    int end = clampedOffset;
-
-    while (start > 0 && !_isWordBoundary(_text[start - 1])) {
-      start--;
-    }
-    while (end < _text.length && !_isWordBoundary(_text[end])) {
-      end++;
-    }
-
-    if (start == end) {
-      // Double-click on whitespace/punctuation: just position cursor there
-      final newSelection = TextSelection.collapsed(offset: clampedOffset);
-      if (newSelection != _selection) {
-        _selection = newSelection;
-        _targetVisualColumn = null;
-        _ensureCursorVisible();
-        onSelectionChange?.call(newSelection);
-        markNeedsPaint();
-      }
-      return;
-    }
-
-    final newSelection = TextSelection(baseOffset: start, extentOffset: end);
-    _selection = newSelection;
-    _targetVisualColumn = null;
-    _ensureCursorVisible();
-    onSelectionChange?.call(newSelection);
-    markNeedsPaint();
-  }
-
-  static bool _isWordBoundary(String char) {
-    // Treat whitespace and common punctuation as word boundaries
-    const boundaries = {
-      ' ',
-      '\t',
-      '\n',
-      '\r',
-      '.',
-      ',',
-      ';',
-      ':',
-      '!',
-      '?',
-      '(',
-      ')',
-      '[',
-      ']',
-      '{',
-      '}',
-      '<',
-      '>',
-      '"',
-      "'",
-      '/',
-      '\\',
-      '|',
-      '-',
-      '+',
-      '=',
-      '*',
-      '&',
-      '^',
-      '%',
-      '#',
-      '@',
-      '~',
-      '`',
-    };
-    return boundaries.contains(char);
+    final start = _wordNavigation.wordStart(_text, clampedOffset);
+    final end = _wordNavigation.wordEnd(_text, clampedOffset);
+    _commitSelection(start == end
+        ? TextSelection.collapsed(offset: clampedOffset)
+        : TextSelection(baseOffset: start, extentOffset: end));
   }
 
   @override

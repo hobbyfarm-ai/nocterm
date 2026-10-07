@@ -72,26 +72,6 @@ void main() {
       expect(offset, lessThanOrEqualTo(8)); // End of first line
     });
 
-    test('moves by word correctly', () {
-      final text = 'Hello world, this is a test!';
-
-      // Move forward by word from start
-      var offset = CursorMovement.moveCursorByWord(
-        text: text,
-        currentOffset: 0,
-        direction: 1,
-      );
-      expect(offset, 6); // After 'Hello '
-
-      // Move backward by word
-      offset = CursorMovement.moveCursorByWord(
-        text: text,
-        currentOffset: 12,
-        direction: -1,
-      );
-      expect(offset, 6); // Start of 'world'
-    });
-
     test('finds correct cursor position in laid out text', () {
       final text = 'First line\nSecond line\nThird';
       final layoutResult = TextLayoutEngine.layout(

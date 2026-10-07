@@ -32,6 +32,7 @@ export 'src/components/auto_scroll_controller.dart';
 export 'src/components/single_child_scroll_view.dart';
 export 'src/components/list_view.dart';
 export 'src/components/text_field.dart';
+export 'src/components/text_field/word_navigation.dart';
 export 'src/components/terminal_xterm.dart';
 export 'nocterm_test.dart';
 export 'src/framework/framework.dart';

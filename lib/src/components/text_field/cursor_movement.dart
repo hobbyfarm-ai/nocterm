@@ -173,47 +173,6 @@ class CursorMovement {
     return newLineStartOffset + columnInNewLine;
   }
 
-  /// Move cursor by word
-  static int moveCursorByWord({
-    required String text,
-    required int currentOffset,
-    required int direction,
-  }) {
-    if (direction == 0 || text.isEmpty) return currentOffset;
-
-    int offset = currentOffset;
-
-    if (direction < 0) {
-      // Move backward by word
-      if (offset == 0) return 0;
-
-      // Skip spaces backward
-      while (offset > 0 && _isWordBoundary(text[offset - 1])) {
-        offset--;
-      }
-
-      // Skip word characters backward
-      while (offset > 0 && !_isWordBoundary(text[offset - 1])) {
-        offset--;
-      }
-    } else {
-      // Move forward by word
-      if (offset >= text.length) return text.length;
-
-      // Skip current word forward
-      while (offset < text.length && !_isWordBoundary(text[offset])) {
-        offset++;
-      }
-
-      // Skip spaces forward
-      while (offset < text.length && _isWordBoundary(text[offset])) {
-        offset++;
-      }
-    }
-
-    return offset;
-  }
-
   /// Move cursor to start of current line
   static int moveCursorToLineStart({
     required TextLayoutResult layoutResult,
@@ -242,29 +201,6 @@ class CursorMovement {
     );
 
     return pos.lineEndOffset;
-  }
-
-  static bool _isWordBoundary(String char) {
-    return char == ' ' ||
-        char == '\t' ||
-        char == '\n' ||
-        char == '\r' ||
-        char == '.' ||
-        char == ',' ||
-        char == ';' ||
-        char == ':' ||
-        char == '!' ||
-        char == '?' ||
-        char == '(' ||
-        char == ')' ||
-        char == '[' ||
-        char == ']' ||
-        char == '{' ||
-        char == '}' ||
-        char == '"' ||
-        char == "'" ||
-        char == '/' ||
-        char == '\\';
   }
 }
 
