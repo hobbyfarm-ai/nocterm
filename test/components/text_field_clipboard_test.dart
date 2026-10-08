@@ -41,6 +41,28 @@ void main() {
       });
     });
 
+    test('Ctrl+X still deletes when onCopy collapses the selection', () async {
+      await testNocterm('cut collapsing sink', (tester) async {
+        final controller = TextEditingController(text: 'Cut this text');
+
+        await tester.pumpComponent(
+          TextField(
+            controller: controller,
+            focused: true,
+            onCopy: (_) => controller.selection =
+                TextSelection.collapsed(offset: controller.text.length),
+          ),
+        );
+        await _selectAll(tester);
+        await tester.sendKeyEvent(KeyboardEvent(
+          logicalKey: LogicalKey.keyX,
+          modifiers: const ModifierKeys(ctrl: true),
+        ));
+
+        expect(controller.text, '');
+      });
+    });
+
     test('Ctrl+X with a collapsed selection does nothing', () async {
       await testNocterm('cut collapsed', (tester) async {
         final controller = TextEditingController(text: 'Keep me');

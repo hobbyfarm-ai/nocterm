@@ -754,8 +754,8 @@ class _TextFieldState extends State<TextField> {
   void _cut() {
     final text = _selectedText;
     if (text == null) return;
-    _sendToClipboard(text);
     _deleteSelection();
+    _sendToClipboard(text);
   }
 
   bool _handlePaste(String text) {
