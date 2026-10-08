@@ -113,33 +113,6 @@ List<Rect> selectionRectsForRange({
   return rects;
 }
 
-final _wordChar = RegExp(r'[\p{L}\p{N}_]', unicode: true);
-final _whitespace = RegExp(r'\s');
-
-/// The character range of the word (or whitespace/symbol run) at [offset].
-({int start, int end}) wordRangeAt(
-    {required String text, required int offset}) {
-  if (text.isEmpty) return (start: 0, end: 0);
-  final anchor = offset.clamp(0, text.length - 1);
-
-  bool sameCategory(String a, String b) {
-    if (_wordChar.hasMatch(a)) return _wordChar.hasMatch(b);
-    if (_whitespace.hasMatch(a)) return _whitespace.hasMatch(b);
-    return !_wordChar.hasMatch(b) && !_whitespace.hasMatch(b);
-  }
-
-  final anchorChar = text[anchor];
-  var start = anchor;
-  while (start > 0 && sameCategory(anchorChar, text[start - 1])) {
-    start--;
-  }
-  var end = anchor + 1;
-  while (end < text.length && sameCategory(anchorChar, text[end])) {
-    end++;
-  }
-  return (start: start, end: end);
-}
-
 /// Paints a single line of text with optional selection highlighting.
 ///
 /// Pass [lineStarts] (from [lineStartOffsets]) when the caller caches it —

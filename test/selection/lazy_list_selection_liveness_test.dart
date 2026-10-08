@@ -90,7 +90,8 @@ void main() {
     disposedItems.clear();
   });
 
-  test('a selection scrolled off-screen is retained because the items are '
+  test(
+      'a selection scrolled off-screen is retained because the items are '
       'kept alive, not because the text is snapshotted', () async {
     await testNocterm(
       'kept-alive liveness',
@@ -137,7 +138,8 @@ void main() {
     );
   });
 
-  test('items removed from the data are disposed and stop contributing their '
+  test(
+      'items removed from the data are disposed and stop contributing their '
       'text to the selection', () async {
     await testNocterm(
       'itemCount shrink liveness',

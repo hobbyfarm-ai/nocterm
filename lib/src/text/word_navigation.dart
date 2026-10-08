@@ -13,6 +13,26 @@ enum WordJumpStyle {
       Platform.isWindows ? startOfNextWord : endOfWord;
 }
 
+/// A half-open character range `[start, end)` within a string.
+class WordRange {
+  const WordRange(this.start, this.end);
+
+  final int start;
+  final int end;
+
+  bool get isEmpty => start == end;
+
+  @override
+  bool operator ==(Object other) =>
+      other is WordRange && other.start == start && other.end == end;
+
+  @override
+  int get hashCode => Object.hash(start, end);
+
+  @override
+  String toString() => 'WordRange($start, $end)';
+}
+
 /// Word semantics shared by cursor movement, selection, and deletion.
 ///
 /// A word is a run of letters, digits, or underscores; everything else —
@@ -23,8 +43,36 @@ class WordNavigation {
   final WordJumpStyle jumpStyle;
 
   static final _wordCharacter = RegExp(r'[\p{L}\p{N}_]', unicode: true);
+  static final _whitespace = RegExp(r'\s');
 
   static bool isWordCharacter(String char) => _wordCharacter.hasMatch(char);
+
+  /// The run under [offset], selected as a unit: a word, a stretch of
+  /// whitespace, or a stretch of punctuation and symbols.
+  ///
+  /// [offset] is clamped onto the text, so an offset at the very end selects
+  /// the last run. Empty text yields an empty range at 0.
+  static WordRange rangeAt(String text, int offset) {
+    if (text.isEmpty) return const WordRange(0, 0);
+    final anchor = offset.clamp(0, text.length - 1);
+    final category = _categoryOf(text[anchor]);
+
+    var start = anchor;
+    while (start > 0 && _categoryOf(text[start - 1]) == category) {
+      start--;
+    }
+    var end = anchor + 1;
+    while (end < text.length && _categoryOf(text[end]) == category) {
+      end++;
+    }
+    return WordRange(start, end);
+  }
+
+  static _CharacterCategory _categoryOf(String char) {
+    if (_wordCharacter.hasMatch(char)) return _CharacterCategory.word;
+    if (_whitespace.hasMatch(char)) return _CharacterCategory.whitespace;
+    return _CharacterCategory.other;
+  }
 
   /// Where a jump from [offset] in [direction] (-1 or 1) lands.
   int jump(String text, int offset, int direction) =>
@@ -48,14 +96,6 @@ class WordNavigation {
     }
   }
 
-  /// Start of the run of word characters ending at or spanning [offset].
-  int wordStart(String text, int offset) =>
-      _skipBackward(text, offset, isWord: true);
-
-  /// End of the run of word characters starting at or spanning [offset].
-  int wordEnd(String text, int offset) =>
-      _skipForward(text, offset, isWord: true);
-
   static int _skipBackward(String text, int offset, {required bool isWord}) {
     var i = offset.clamp(0, text.length);
     while (i > 0 && isWordCharacter(text[i - 1]) == isWord) {
@@ -72,3 +112,5 @@ class WordNavigation {
     return i;
   }
 }
+
+enum _CharacterCategory { word, whitespace, other }

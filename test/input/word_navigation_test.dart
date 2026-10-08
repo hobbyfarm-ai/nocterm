@@ -1,4 +1,4 @@
-import 'package:nocterm/src/components/text_field/word_navigation.dart';
+import 'package:nocterm/src/text/word_navigation.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -64,21 +64,37 @@ void main() {
     });
   });
 
-  group('wordStart / wordEnd', () {
-    test('bound the word spanning the offset', () {
-      expect(readline.wordStart(text, at('qux') + 1), at('qux'));
-      expect(readline.wordEnd(text, at('qux') + 1), after('qux'));
+  group('rangeAt', () {
+    test('bounds the word spanning the offset', () {
+      expect(WordNavigation.rangeAt(text, at('qux') + 1),
+          WordRange(at('qux'), after('qux')));
     });
 
-    test('collapse to the offset between two separators', () {
-      final gap = after('qux') + 1;
-      expect(readline.wordStart(text, gap), gap);
-      expect(readline.wordEnd(text, gap), gap);
+    test('a whitespace run is one unit', () {
+      final gap = after('qux');
+      expect(WordNavigation.rangeAt(text, gap), WordRange(gap, gap + 2));
+      expect(WordNavigation.rangeAt(text, gap + 1), WordRange(gap, gap + 2));
     });
 
-    test('an offset just after a word still selects that word', () {
-      expect(readline.wordStart(text, after('baz')), at('baz'));
-      expect(readline.wordEnd(text, after('baz')), after('baz'));
+    test('a punctuation run is one unit', () {
+      expect(WordNavigation.rangeAt('a, ;b', 1), const WordRange(1, 2));
+      expect(WordNavigation.rangeAt('a,;.b', 2), const WordRange(1, 4));
+    });
+
+    test('the offset just after a word is the separator, not the word', () {
+      expect(WordNavigation.rangeAt(text, after('baz')),
+          WordRange(after('baz'), at('qux')));
+    });
+
+    test('offsets are clamped onto the text', () {
+      expect(WordNavigation.rangeAt(text, text.length + 5),
+          WordRange(at('end'), text.length));
+      expect(WordNavigation.rangeAt(text, -3), WordRange(0, after('foo_bar')));
+    });
+
+    test('empty text yields an empty range', () {
+      expect(WordNavigation.rangeAt('', 3), const WordRange(0, 0));
+      expect(WordNavigation.rangeAt('', 3).isEmpty, isTrue);
     });
   });
 
@@ -86,7 +102,6 @@ void main() {
     test('out-of-range offsets never throw', () {
       expect(readline.previousStart(text, -5), 0);
       expect(readline.nextStop(text, text.length + 5), text.length);
-      expect(readline.wordStart('', 3), 0);
       expect(readline.nextStop('', 0), 0);
     });
   });

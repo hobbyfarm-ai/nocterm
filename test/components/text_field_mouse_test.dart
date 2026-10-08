@@ -259,6 +259,38 @@ void main() {
           },
         );
       });
+
+      test('double-click on the space after a word selects the space',
+          () async {
+        await testNocterm(
+          'double-click space',
+          (tester) async {
+            final controller = TextEditingController(text: 'Hello  World');
+
+            await tester.pumpComponent(
+              Container(
+                width: 30,
+                height: 1,
+                child: TextField(
+                  controller: controller,
+                  focused: true,
+                  maxLines: 1,
+                  showCursor: true,
+                  cursorBlinkRate: null,
+                ),
+              ),
+            );
+
+            await tester.press(5, 0);
+            await tester.release(5, 0);
+            await tester.press(5, 0);
+            await tester.release(5, 0);
+
+            expect(controller.selection.baseOffset, 5);
+            expect(controller.selection.extentOffset, 7);
+          },
+        );
+      });
     });
 
     group('click triggers focus', () {

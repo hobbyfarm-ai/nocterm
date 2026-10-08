@@ -1,277 +1,231 @@
 import 'package:nocterm/nocterm.dart';
-import 'package:test/test.dart' hide isEmpty;
+import 'package:test/test.dart';
+
+Future<void> _selectAll(NoctermTester tester) => tester.sendKeyEvent(
+      KeyboardEvent(
+        logicalKey: LogicalKey.keyA,
+        modifiers: const ModifierKeys(ctrl: true),
+      ),
+    );
+
+Future<void> _drag(NoctermTester tester, int fromX, int toX) async {
+  await tester.press(fromX, 0);
+  await tester.sendMouseEvent(MouseEvent(
+    button: MouseButton.left,
+    x: toX,
+    y: 0,
+    pressed: true,
+    isMotion: true,
+  ));
+  await tester.release(toX, 0);
+}
 
 void main() {
-  group('TextField clipboard integration', () {
-    // Ctrl+C is intentionally reserved for app termination in TUI applications.
-    // Copy functionality would need an alternative keybinding if supported.
-    test('copy selected text with Ctrl+C', () async {
-      await testNocterm(
-        'TextField copy test',
-        (tester) async {
-          final controller = TextEditingController(text: 'Hello, World!');
+  group('TextField copy sink', () {
+    test('Ctrl+X hands the selection to onCopy and deletes it', () async {
+      await testNocterm('cut', (tester) async {
+        final controller = TextEditingController(text: 'Cut this text');
+        final copied = <String>[];
 
-          await tester.pumpComponent(
-            TextField(
-              controller: controller,
-              focused: true,
-              decoration: InputDecoration(
-                border: BoxBorder.all(),
-              ),
-            ),
-          );
+        await tester.pumpComponent(
+          TextField(controller: controller, focused: true, onCopy: copied.add),
+        );
+        await _selectAll(tester);
+        await tester.sendKeyEvent(KeyboardEvent(
+          logicalKey: LogicalKey.keyX,
+          modifiers: const ModifierKeys(ctrl: true),
+        ));
 
-          // Select all text with Ctrl+A
-          await tester.sendKeyEvent(KeyboardEvent(
-            logicalKey: LogicalKey.keyA,
-            modifiers: const ModifierKeys(ctrl: true),
-          ));
-          await tester.pump();
-
-          // Verify selection works
-          expect(controller.selection.start, 0);
-          expect(controller.selection.end, controller.text.length);
-
-          // Ctrl+C is reserved for app termination, so it doesn't copy.
-          // Verify the text field still has the selection (not cleared).
-          expect(controller.selection.isCollapsed, false);
-        },
-      );
+        expect(controller.text, '');
+        expect(copied, ['Cut this text']);
+      });
     });
 
-    test('cut selected text with Ctrl+X', () async {
-      await testNocterm(
-        'TextField cut test',
-        (tester) async {
-          final controller = TextEditingController(text: 'Cut this text');
+    test('Ctrl+X with a collapsed selection does nothing', () async {
+      await testNocterm('cut collapsed', (tester) async {
+        final controller = TextEditingController(text: 'Keep me');
+        final copied = <String>[];
 
-          await tester.pumpComponent(
-            TextField(
-              controller: controller,
-              focused: true,
-              decoration: InputDecoration(
-                border: BoxBorder.all(),
-              ),
-            ),
-          );
+        await tester.pumpComponent(
+          TextField(controller: controller, focused: true, onCopy: copied.add),
+        );
+        await tester.sendKeyEvent(KeyboardEvent(
+          logicalKey: LogicalKey.keyX,
+          modifiers: const ModifierKeys(ctrl: true),
+        ));
 
-          // Select all text
-          await tester.sendKeyEvent(KeyboardEvent(
-            logicalKey: LogicalKey.keyA,
-            modifiers: const ModifierKeys(ctrl: true),
-          ));
-          await tester.pump();
-
-          // Clear clipboard
-          ClipboardManager.clear();
-
-          // Cut with Ctrl+X
-          await tester.sendKeyEvent(KeyboardEvent(
-            logicalKey: LogicalKey.keyX,
-            modifiers: const ModifierKeys(ctrl: true),
-          ));
-          await tester.pump();
-
-          // Verify text was removed
-          expect(controller.text, '');
-
-          // Verify clipboard has the content
-          expect(ClipboardManager.paste(), equals('Cut this text'));
-        },
-      );
+        expect(controller.text, 'Keep me');
+        expect(copied, hasLength(0));
+      });
     });
 
-    test('paste text with Ctrl+V', () async {
-      await testNocterm(
-        'TextField paste test',
-        (tester) async {
-          final controller = TextEditingController(text: '');
+    test('without onCopy, a cut lands in the in-process clipboard', () async {
+      await testNocterm('cut fallback', (tester) async {
+        final controller = TextEditingController(text: 'Fallback');
 
-          // Put some text in the clipboard
-          ClipboardManager.copy('Pasted content');
+        await tester.pumpComponent(
+          TextField(controller: controller, focused: true),
+        );
+        await _selectAll(tester);
+        await tester.sendKeyEvent(KeyboardEvent(
+          logicalKey: LogicalKey.keyX,
+          modifiers: const ModifierKeys(ctrl: true),
+        ));
 
-          await tester.pumpComponent(
-            TextField(
-              controller: controller,
-              focused: true,
-              decoration: InputDecoration(
-                border: BoxBorder.all(),
-              ),
-            ),
-          );
-
-          // Paste with Ctrl+V
-          await tester.sendKeyEvent(KeyboardEvent(
-            logicalKey: LogicalKey.keyV,
-            modifiers: const ModifierKeys(ctrl: true),
-          ));
-          await tester.pump();
-
-          // Verify text was pasted
-          expect(controller.text, equals('Pasted content'));
-        },
-      );
+        expect(controller.text, '');
+        expect(ClipboardManager.paste(), 'Fallback');
+      });
     });
 
-    test('paste replaces selected text', () async {
-      await testNocterm(
-        'TextField paste replaces selection',
-        (tester) async {
-          final controller = TextEditingController(text: 'Replace me');
+    test('Ctrl+C bubbles and keeps the selection', () async {
+      await testNocterm('ctrl+c bubbles', (tester) async {
+        final controller = TextEditingController(text: 'Hello, World!');
+        final copied = <String>[];
+        final bubbled = <LogicalKey>[];
 
-          // Put replacement text in clipboard
-          ClipboardManager.copy('New text');
-
-          await tester.pumpComponent(
-            TextField(
+        await tester.pumpComponent(
+          Focusable(
+            focused: true,
+            onKeyEvent: (event) {
+              bubbled.add(event.logicalKey);
+              return true;
+            },
+            child: TextField(
               controller: controller,
               focused: true,
-              decoration: InputDecoration(
-                border: BoxBorder.all(),
-              ),
+              onCopy: copied.add,
             ),
-          );
+          ),
+        );
+        await _selectAll(tester);
+        await tester.sendKeyEvent(KeyboardEvent(
+          logicalKey: LogicalKey.keyC,
+          modifiers: const ModifierKeys(ctrl: true),
+        ));
 
-          // Select all
-          await tester.sendKeyEvent(KeyboardEvent(
-            logicalKey: LogicalKey.keyA,
-            modifiers: const ModifierKeys(ctrl: true),
-          ));
-          await tester.pump();
-
-          // Paste to replace
-          await tester.sendKeyEvent(KeyboardEvent(
-            logicalKey: LogicalKey.keyV,
-            modifiers: const ModifierKeys(ctrl: true),
-          ));
-          await tester.pump();
-
-          // Verify text was replaced
-          expect(controller.text, equals('New text'));
-        },
-      );
+        expect(bubbled, [LogicalKey.keyC]);
+        expect(copied, hasLength(0));
+        expect(controller.selection.isCollapsed, isFalse);
+      });
     });
 
-    // Tests cut-paste workflow since Ctrl+C is reserved for app termination.
-    // This verifies clipboard integration using Ctrl+X (cut) instead of Ctrl+C (copy).
-    test('cut-paste workflow', () async {
-      await testNocterm(
-        'TextField cut-paste workflow',
-        (tester) async {
-          final controller = TextEditingController(text: 'Original text');
+    test('a mouse drag copies the selection on release', () async {
+      await testNocterm('drag copies', (tester) async {
+        final controller = TextEditingController(text: 'Hello World');
+        final copied = <String>[];
 
-          await tester.pumpComponent(
-            TextField(
+        await tester.pumpComponent(
+          Container(
+            width: 30,
+            height: 1,
+            child: TextField(
               controller: controller,
               focused: true,
-              decoration: InputDecoration(
-                border: BoxBorder.all(),
-              ),
+              maxLines: 1,
+              onCopy: copied.add,
             ),
-          );
+          ),
+        );
+        await _drag(tester, 1, 4);
 
-          // Select all
-          await tester.sendKeyEvent(KeyboardEvent(
-            logicalKey: LogicalKey.keyA,
-            modifiers: const ModifierKeys(ctrl: true),
-          ));
-          await tester.pump();
-
-          // Cut (Ctrl+X works, unlike Ctrl+C which is reserved for app termination)
-          await tester.sendKeyEvent(KeyboardEvent(
-            logicalKey: LogicalKey.keyX,
-            modifiers: const ModifierKeys(ctrl: true),
-          ));
-          await tester.pump();
-
-          // Verify text was cut
-          expect(controller.text, equals(''));
-
-          // Paste twice to verify clipboard content
-          await tester.sendKeyEvent(KeyboardEvent(
-            logicalKey: LogicalKey.keyV,
-            modifiers: const ModifierKeys(ctrl: true),
-          ));
-          await tester.pump();
-
-          await tester.enterText(' ');
-          await tester.pump();
-
-          await tester.sendKeyEvent(KeyboardEvent(
-            logicalKey: LogicalKey.keyV,
-            modifiers: const ModifierKeys(ctrl: true),
-          ));
-          await tester.pump();
-
-          // Should have original text + space + original text again
-          expect(controller.text, equals('Original text Original text'));
-        },
-      );
+        expect(controller.selection.start, 1);
+        expect(controller.selection.end, 4);
+        expect(copied, ['ell']);
+      });
     });
 
-    test('paste handles Unicode correctly', () async {
-      await testNocterm(
-        'TextField paste Unicode',
-        (tester) async {
-          final controller = TextEditingController(text: '');
-          const unicodeText = '你好世界 🎉 Emoji text';
+    test('a plain click copies nothing', () async {
+      await testNocterm('click copies nothing', (tester) async {
+        final controller = TextEditingController(text: 'Hello World');
+        final copied = <String>[];
 
-          ClipboardManager.copy(unicodeText);
-
-          await tester.pumpComponent(
-            TextField(
+        await tester.pumpComponent(
+          Container(
+            width: 30,
+            height: 1,
+            child: TextField(
               controller: controller,
               focused: true,
-              decoration: InputDecoration(
-                border: BoxBorder.all(),
-              ),
+              maxLines: 1,
+              onCopy: copied.add,
             ),
-          );
+          ),
+        );
+        await tester.press(3, 0);
+        await tester.release(3, 0);
 
-          // Paste
-          await tester.sendKeyEvent(KeyboardEvent(
-            logicalKey: LogicalKey.keyV,
-            modifiers: const ModifierKeys(ctrl: true),
-          ));
-          await tester.pump();
-
-          // Verify Unicode text was pasted correctly
-          expect(controller.text, equals(unicodeText));
-        },
-      );
+        expect(copied, hasLength(0));
+      });
     });
 
-    test('paste handles multi-line text in single-line field', () async {
-      await testNocterm(
-        'TextField paste multi-line in single-line field',
-        (tester) async {
-          final controller = TextEditingController(text: '');
+    test('a double-click copies the word', () async {
+      await testNocterm('double-click copies', (tester) async {
+        final controller = TextEditingController(text: 'Hello World');
+        final copied = <String>[];
 
-          // Put multi-line text in clipboard
-          ClipboardManager.copy('Line 1\nLine 2\nLine 3');
-
-          await tester.pumpComponent(
-            TextField(
+        await tester.pumpComponent(
+          Container(
+            width: 30,
+            height: 1,
+            child: TextField(
               controller: controller,
               focused: true,
-              maxLines: 1, // Single-line field
-              decoration: InputDecoration(
-                border: BoxBorder.all(),
-              ),
+              maxLines: 1,
+              onCopy: copied.add,
             ),
-          );
+          ),
+        );
+        await tester.press(7, 0);
+        await tester.release(7, 0);
+        await tester.press(7, 0);
+        await tester.release(7, 0);
 
-          // Paste - newlines should be converted to spaces in single-line fields
-          await tester.sendKeyEvent(KeyboardEvent(
-            logicalKey: LogicalKey.keyV,
-            modifiers: const ModifierKeys(ctrl: true),
-          ));
-          await tester.pump();
+        expect(copied, ['World']);
+      });
+    });
 
-          // In a single-line field, newlines are converted to spaces
-          expect(controller.text, equals('Line 1 Line 2 Line 3'));
-        },
-      );
+    test('keyboard selection copies nothing', () async {
+      await testNocterm('keyboard selection', (tester) async {
+        final controller = TextEditingController(text: 'Hello');
+        controller.selection = const TextSelection.collapsed(offset: 0);
+        final copied = <String>[];
+
+        await tester.pumpComponent(
+          TextField(controller: controller, focused: true, onCopy: copied.add),
+        );
+        await tester.sendKeyEvent(KeyboardEvent(
+          logicalKey: LogicalKey.arrowRight,
+          modifiers: const ModifierKeys(shift: true),
+        ));
+
+        expect(controller.selection.isCollapsed, isFalse);
+        expect(copied, hasLength(0));
+      });
+    });
+
+    test('an obscured field never copies', () async {
+      await testNocterm('obscured', (tester) async {
+        final controller = TextEditingController(text: 'hunter2');
+        final copied = <String>[];
+
+        await tester.pumpComponent(
+          Container(
+            width: 30,
+            height: 1,
+            child: TextField(
+              controller: controller,
+              focused: true,
+              maxLines: 1,
+              obscureText: true,
+              onCopy: copied.add,
+            ),
+          ),
+        );
+        await _drag(tester, 0, 5);
+
+        expect(controller.selection.isCollapsed, isFalse);
+        expect(copied, hasLength(0));
+      });
     });
   });
 }

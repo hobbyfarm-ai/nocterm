@@ -1,5 +1,4 @@
 import 'package:nocterm/nocterm.dart';
-import 'package:nocterm/src/framework/terminal_canvas.dart';
 import 'package:nocterm/src/rendering/mouse_hit_test.dart';
 import 'package:nocterm/src/rendering/mouse_tracker.dart';
 import 'package:test/test.dart';
@@ -27,9 +26,6 @@ class _RenderAbsorber extends RenderObject with MouseTrackerAnnotationProvider {
       Size(constraints.maxWidth, constraints.maxHeight),
     );
   }
-
-  @override
-  void paint(TerminalCanvas canvas, Offset offset) {}
 
   @override
   bool hitTest(HitTestResult result, {required Offset position}) {

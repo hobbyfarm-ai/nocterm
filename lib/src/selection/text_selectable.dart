@@ -7,6 +7,7 @@ import '../rendering/reflow_anchorable.dart';
 import '../style.dart';
 import '../text/selection_utils.dart' as selection_utils;
 import '../text/text_layout_engine.dart';
+import '../text/word_navigation.dart';
 import 'selection.dart';
 
 /// Implements the [Selectable] contract for render objects that display
@@ -121,10 +122,7 @@ mixin TextSelectable on RenderObject, Selectable implements ReflowAnchorable {
     if (contentLength == 0) return SelectionResult.none;
     final local = event.globalPosition - globalPaintOffset;
     final offset = getCharacterIndexAtLocalPosition(local);
-    final range = selection_utils.wordRangeAt(
-      text: selectableText,
-      offset: offset,
-    );
+    final range = WordNavigation.rangeAt(selectableText, offset);
     _setSelection(range.start, range.end);
     return SelectionResult.end;
   }

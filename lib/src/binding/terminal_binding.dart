@@ -324,16 +324,7 @@ class TerminalBinding extends NoctermBinding
           // Route the mouse event through the component tree
           routeMouseEvent(mouseEvent);
         } else if (event is PasteInputEvent) {
-          // Handle bracketed paste (or batched characters): copy to clipboard then send Ctrl+V
-          ClipboardManager.copy(event.text);
-
-          // Generate a Ctrl+V keyboard event to trigger the paste
-          final pasteEvent = KeyboardEvent(
-            logicalKey: LogicalKey.keyV,
-            modifiers: const ModifierKeys(ctrl: true),
-          );
-          _keyboardEventController.add(pasteEvent);
-          _routeKeyboardEvent(pasteEvent);
+          _routePasteEvent(event.text);
         } else if (event is CursorPositionReport) {
           _cursorPositionController.add(event);
         }
@@ -658,10 +649,20 @@ class TerminalBinding extends NoctermBinding
   /// Returns true if the event was handled by a component
   bool _routeKeyboardEvent(KeyboardEvent event) {
     if (rootElement == null) return false;
+    return _dispatchToFocusable(
+      rootElement!,
+      (focusable) => focusable.handleKeyEvent(event),
+    );
+  }
 
-    // Try to dispatch the event to the root element
-    // The event will bubble through focused components
-    return _dispatchKeyToElement(rootElement!, event);
+  /// Route pasted text through the component tree to the focused component.
+  /// Returns true if a component consumed it.
+  bool _routePasteEvent(String text) {
+    if (rootElement == null) return false;
+    return _dispatchToFocusable(
+      rootElement!,
+      (focusable) => focusable.handlePaste(text),
+    );
   }
 
   /// Dispatch raw stdin bytes to [InputListenerElement]s in the tree.
@@ -689,12 +690,16 @@ class TerminalBinding extends NoctermBinding
     return handled;
   }
 
-  /// Dispatch a keyboard event to an element and its children
-  bool _dispatchKeyToElement(Element element, KeyboardEvent event) {
-    // Check if this element is a BlockFocus that's blocking
+  /// Walks [element] depth-first, children before parents, offering
+  /// [deliver] to each [FocusableElement] until one consumes the input.
+  /// A blocking [BlockFocusElement] stops the walk; a [RenderTheater] only
+  /// forwards to its topmost child.
+  bool _dispatchToFocusable(
+    Element element,
+    bool Function(FocusableElement focusable) deliver,
+  ) {
     if (element is BlockFocusElement && element.isBlocking) {
-      // Block all keyboard events from reaching children
-      return true; // Event is handled (blocked)
+      return true;
     }
 
     // TODO: This is a hack to handle RenderTheater specially for Navigator
@@ -703,21 +708,19 @@ class TerminalBinding extends NoctermBinding
       final multiChildRenderObject = element as MultiChildRenderObjectElement;
       if (multiChildRenderObject.children.isNotEmpty) {
         final child = multiChildRenderObject.children.last;
-        return _dispatchKeyToElement(child, event);
+        return _dispatchToFocusable(child, deliver);
       }
     }
 
-    // First, try to dispatch to children (depth-first)
     bool handled = false;
     element.visitChildren((child) {
       if (!handled) {
-        handled = _dispatchKeyToElement(child, event);
+        handled = _dispatchToFocusable(child, deliver);
       }
     });
 
-    // If no child handled it, and this element can handle keys, try it
     if (!handled && element is FocusableElement) {
-      handled = element.handleKeyEvent(event);
+      handled = deliver(element);
     }
 
     return handled;

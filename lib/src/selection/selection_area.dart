@@ -3,12 +3,14 @@ import '../framework/framework.dart';
 import '../keyboard/mouse_event.dart';
 import '../rendering/mouse_region.dart';
 import '../rendering/mouse_tracker.dart';
+import '../rendering/double_click_detector.dart';
 import '../rendering/pointer_gesture.dart';
 import '../style.dart';
 import '../theme/tui_theme.dart';
 import 'selection.dart';
 import 'selection_container.dart';
 import 'selection_container_delegate.dart';
+import 'selection_controller.dart';
 
 /// The colors used to paint selected text, provided by [SelectionArea].
 ///
@@ -66,6 +68,7 @@ class SelectionArea extends StatefulComponent {
   const SelectionArea({
     super.key,
     required this.child,
+    this.controller,
     this.selection,
     this.onSelection,
     this.onSelectionChanged,
@@ -74,6 +77,9 @@ class SelectionArea extends StatefulComponent {
 
   /// The subtree in which text can be selected.
   final Component child;
+
+  /// Reads and clears the selection from outside the area.
+  final SelectionController? controller;
 
   /// Background color used to highlight selected text.
   /// If null, defaults to [TuiThemeData.selection].
@@ -105,6 +111,15 @@ class _SelectionAreaState extends State<SelectionArea> {
   void initState() {
     super.initState();
     _delegate.addListener(_handleSelectionGeometryChanged);
+    component.controller?.attach(_delegate);
+  }
+
+  @override
+  void didUpdateComponent(SelectionArea oldComponent) {
+    super.didUpdateComponent(oldComponent);
+    if (identical(component.controller, oldComponent.controller)) return;
+    oldComponent.controller?.detach();
+    component.controller?.attach(_delegate);
   }
 
   // Selected content is rebuilt from every selected child, which is too
@@ -128,6 +143,7 @@ class _SelectionAreaState extends State<SelectionArea> {
 
   @override
   void dispose() {
+    component.controller?.detach();
     _delegate.removeListener(_handleSelectionGeometryChanged);
     _delegate.dispose();
     super.dispose();
@@ -188,8 +204,6 @@ class RenderSelectionArea extends RenderMouseRegion {
     _delegate.container = this;
   }
 
-  static const _doubleClickWindow = Duration(milliseconds: 400);
-
   StaticSelectionContainerDelegate _delegate;
   StaticSelectionContainerDelegate get delegate => _delegate;
   set delegate(StaticSelectionContainerDelegate value) {
@@ -202,8 +216,7 @@ class RenderSelectionArea extends RenderMouseRegion {
   void Function(String)? onSelectionCompleted;
 
   Offset _lastPointerPosition = Offset.zero;
-  DateTime? _lastPressTime;
-  Offset? _lastPressPosition;
+  final _doubleClick = DoubleClickDetector();
   bool _postFrameEdgeUpdateScheduled = false;
   bool _isDragging = false;
 
@@ -257,16 +270,10 @@ class RenderSelectionArea extends RenderMouseRegion {
   }
 
   void _handlePointerDown(Offset position) {
-    final now = DateTime.now();
-    final isDoubleClick = _lastPressTime != null &&
-        now.difference(_lastPressTime!) < _doubleClickWindow &&
-        _lastPressPosition == position;
-    _lastPressTime = now;
-    _lastPressPosition = position;
     _lastPointerPosition = position;
     _isDragging = true;
 
-    if (isDoubleClick) {
+    if (_doubleClick.press(position)) {
       _delegate.dispatchSelectionEvent(
           SelectWordSelectionEvent(globalPosition: position));
       return;

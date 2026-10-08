@@ -291,8 +291,8 @@ void main() {
     test('selectable churn rebuilds the combined geometry once per flush', () {
       late _GeometryCountingDelegate counting;
       final harness = _Harness(
-        createDelegate: (schedule) => counting =
-            _GeometryCountingDelegate(schedulePostFrame: schedule),
+        createDelegate: (schedule) =>
+            counting = _GeometryCountingDelegate(schedulePostFrame: schedule),
       );
       final a = harness.addBlock('hello world', row: 0);
       final b = harness.addBlock('foo bar', row: 1);

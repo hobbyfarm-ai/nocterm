@@ -48,6 +48,8 @@ class NoctermTestBinding extends NoctermBinding
   /// Queue of pending keyboard events to be processed
   final _pendingKeyboardEvents = <KeyboardEvent>[];
 
+  final _pendingPastes = <String>[];
+
   /// Queue of pending mouse events to be processed
   final _pendingMouseEvents = <MouseEvent>[];
 
@@ -77,6 +79,11 @@ class NoctermTestBinding extends NoctermBinding
     while (_pendingKeyboardEvents.isNotEmpty) {
       final event = _pendingKeyboardEvents.removeAt(0);
       _routeKeyboardEvent(event);
+    }
+
+    while (_pendingPastes.isNotEmpty) {
+      final text = _pendingPastes.removeAt(0);
+      _routePasteEvent(text);
     }
 
     // Process any pending mouse events
@@ -126,6 +133,11 @@ class NoctermTestBinding extends NoctermBinding
   }
 
   /// Simulate keyboard input
+  /// Queue pasted text, delivered to the focused component on the next pump.
+  void sendPaste(String text) {
+    _pendingPastes.add(text);
+  }
+
   void sendKeyboardEvent(KeyboardEvent event) {
     _pendingKeyboardEvents.add(event);
   }
@@ -272,34 +284,44 @@ class NoctermTestBinding extends NoctermBinding
     return handled;
   }
 
+  bool _routePasteEvent(String text) {
+    if (rootElement == null) return false;
+    return _dispatchToElement(
+      rootElement!,
+      (element) => element is FocusableElement && element.handlePaste(text),
+    );
+  }
+
   bool _dispatchKeyToElement(Element element, KeyboardEvent event) {
-    // Check if this element is a BlockFocus that's blocking
-    // Import BlockFocusElement dynamically to avoid circular dependencies
-    if (element.runtimeType.toString() == 'BlockFocusElement') {
-      final dynamic blockFocusElement = element;
-      if (blockFocusElement.isBlocking == true) {
-        // Block all keyboard events from reaching children
-        return true; // Event is "handled" (blocked)
+    return _dispatchToElement(element, (element) {
+      if (element is FocusableElement && element.handleKeyEvent(event)) {
+        return true;
       }
+      final Object component = element.component;
+      return component is KeyboardHandler && component.handleKeyEvent(event);
+    });
+  }
+
+  /// Walks [element] depth-first, children before parents, offering
+  /// [deliver] to each element until one consumes the input. A blocking
+  /// [BlockFocusElement] stops the walk.
+  bool _dispatchToElement(
+    Element element,
+    bool Function(Element element) deliver,
+  ) {
+    if (element is BlockFocusElement && element.isBlocking) {
+      return true;
     }
 
-    // First, try to dispatch to children (depth-first)
     bool handled = false;
     element.visitChildren((child) {
       if (!handled) {
-        handled = _dispatchKeyToElement(child, event);
+        handled = _dispatchToElement(child, deliver);
       }
     });
 
-    // Check if this is a FocusableElement
-    if (!handled && element is FocusableElement) {
-      handled = element.handleKeyEvent(event);
-    }
-
-    // If no child handled it, and this element's component can handle keys, try it
-    if (!handled && element.component is KeyboardHandler) {
-      final handler = element.component as KeyboardHandler;
-      handled = handler.handleKeyEvent(event);
+    if (!handled) {
+      handled = deliver(element);
     }
 
     return handled;

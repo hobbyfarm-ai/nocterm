@@ -113,6 +113,12 @@ class NoctermTester {
     await pump();
   }
 
+  /// Paste text, as the terminal does with bracketed paste
+  Future<void> paste(String text) async {
+    _binding.sendPaste(text);
+    await pump();
+  }
+
   /// Send a keyboard event
   Future<void> sendKeyEvent(KeyboardEvent event) async {
     _binding.sendKeyboardEvent(event);

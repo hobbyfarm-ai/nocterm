@@ -5,6 +5,9 @@ import '../keyboard/keyboard_event.dart';
 /// Returns true if the event was handled, false otherwise.
 typedef KeyEventHandler = bool Function(KeyboardEvent event);
 
+/// Handles text pasted from the terminal. Returns true if it was consumed.
+typedef PasteHandler = bool Function(String text);
+
 /// A component that can receive keyboard focus and handle keyboard events.
 ///
 /// This component wraps its child and, when focused, receives keyboard events
@@ -35,6 +38,7 @@ class Focusable extends StatelessComponent {
     super.key,
     required this.focused,
     required this.onKeyEvent,
+    this.onPaste,
     required this.child,
   });
 
@@ -44,6 +48,10 @@ class Focusable extends StatelessComponent {
   /// Callback to handle keyboard events with character data.
   /// Should return true if the event was handled, false otherwise.
   final KeyEventHandler onKeyEvent;
+
+  /// Receives text pasted while this component is focused. Unhandled pastes
+  /// bubble up like unhandled keys.
+  final PasteHandler? onPaste;
 
   /// The child component to wrap.
   final Component child;
@@ -70,5 +78,11 @@ class FocusableElement extends StatelessElement {
 
     final handled = component.onKeyEvent(event);
     return handled;
+  }
+
+  /// Handle pasted text if this element is focused.
+  bool handlePaste(String text) {
+    if (!component.focused) return false;
+    return component.onPaste?.call(text) ?? false;
   }
 }

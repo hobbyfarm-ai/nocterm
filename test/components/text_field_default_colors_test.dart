@@ -32,10 +32,14 @@ void main() {
         expect(controller.selection.end, controller.text.length);
         expect(controller.selection.isCollapsed, false);
 
-        print(
-            'Selected text: "${controller.text.substring(controller.selection.start, controller.selection.end)}"');
+        final selectedCell = tester.terminalState.buffer.getCell(1, 1);
+        expect(selectedCell.char, 'T');
+        expect(
+          selectedCell.style.backgroundColor,
+          TuiThemeData.dark.selection,
+        );
+        expect(selectedCell.style.color, TuiThemeData.dark.onSelection);
       },
-      debugPrintAfterPump: true,
     );
   });
 }

@@ -126,6 +126,7 @@ class TextField extends StatefulComponent {
     this.onEditingComplete,
     this.onSubmitted,
     this.onPaste,
+    this.onCopy,
     this.onKeyEvent,
     this.enabled = true,
     this.cursorColor,
@@ -170,6 +171,13 @@ class TextField extends StatefulComponent {
   /// Return `false` or null to proceed with default insertion.
   final bool Function(String pastedText)? onPaste;
 
+  /// Receives text leaving the field for the clipboard: a mouse press
+  /// released over a non-collapsed selection, or a cut.
+  ///
+  /// Never called with empty text, for keyboard-only selection, or when
+  /// [obscureText] is set. When null, text is copied with [ClipboardManager].
+  final void Function(String text)? onCopy;
+
   /// Callback invoked when a key event occurs, before TextField processes it.
   /// Return `true` to indicate the event was handled (TextField will skip processing).
   /// Return `false` to let TextField handle the event normally.
@@ -186,8 +194,7 @@ class TextField extends StatefulComponent {
 
   /// The color of the text selection highlight.
   ///
-  /// If null, defaults to the theme's [TuiThemeData.primary] color with
-  /// reduced opacity.
+  /// If null, defaults to the theme's [TuiThemeData.selection].
   final Color? selectionColor;
 
   /// Foreground color for text drawn on top of [selectionColor].
@@ -466,14 +473,8 @@ class _TextFieldState extends State<TextField> {
     } else if (event.matches(LogicalKey.keyA, ctrl: true)) {
       _selectAll();
       return true;
-    } else if (event.matches(LogicalKey.keyC, ctrl: true)) {
-      _copy();
-      return true;
     } else if (event.matches(LogicalKey.keyX, ctrl: true)) {
       _cut();
-      return true;
-    } else if (event.matches(LogicalKey.keyV, ctrl: true)) {
-      _paste();
       return true;
     } else if (event.matches(LogicalKey.keyT, ctrl: true)) {
       _transposeCharacters();
@@ -569,18 +570,6 @@ class _TextFieldState extends State<TextField> {
       final deleteLength = isCollapsed ? 0 : (clampedEnd - clampedStart);
 
       if (currentLength - deleteLength + insertLength > component.maxLength!) {
-        return;
-      }
-    }
-
-    // Check max lines for multi-line fields
-    if (component.maxLines != null &&
-        component.maxLines! > 1 &&
-        char.contains('\n')) {
-      final currentLines = text.split('\n').length;
-      final newLines = char.split('\n').length - 1;
-
-      if (currentLines + newLines > component.maxLines!) {
         return;
       }
     }
@@ -742,73 +731,48 @@ class _TextFieldState extends State<TextField> {
     );
   }
 
-  void _copy() {
-    // Copy selected text to clipboard using OSC 52
-    if (!_controller.selection.isCollapsed) {
-      final text = _controller.text;
-      final selection = _controller.selection;
+  /// The selected text with offsets clamped to the current text, or null
+  /// when the selection is collapsed.
+  String? get _selectedText {
+    final text = _controller.text;
+    final selection = _controller.selection;
+    final start = selection.start.clamp(0, text.length);
+    final end = selection.end.clamp(0, text.length);
+    if (start >= end) return null;
+    return text.substring(start, end);
+  }
 
-      // Clamp selection offsets to valid range to handle race conditions
-      final textLength = text.length;
-      final clampedStart = selection.start.clamp(0, textLength);
-      final clampedEnd = selection.end.clamp(0, textLength);
+  void _sendToClipboard(String text) =>
+      (component.onCopy ?? ClipboardManager.copy)(text);
 
-      if (clampedStart < clampedEnd) {
-        final selectedText = text.substring(clampedStart, clampedEnd);
-        ClipboardManager.copy(selectedText);
-      }
-    }
+  void _handleSelectionCompleted() {
+    if (component.obscureText) return;
+    final text = _selectedText;
+    if (text != null) _sendToClipboard(text);
   }
 
   void _cut() {
-    // Copy selected text to clipboard and then delete it
-    if (!_controller.selection.isCollapsed) {
-      final text = _controller.text;
-      final selection = _controller.selection;
-
-      // Clamp selection offsets to valid range to handle race conditions
-      final textLength = text.length;
-      final clampedStart = selection.start.clamp(0, textLength);
-      final clampedEnd = selection.end.clamp(0, textLength);
-
-      if (clampedStart < clampedEnd) {
-        final selectedText = text.substring(clampedStart, clampedEnd);
-
-        // Copy to clipboard using OSC 52
-        ClipboardManager.copy(selectedText);
-
-        // Delete the selected text
-        _controller.text =
-            text.substring(0, clampedStart) + text.substring(clampedEnd);
-        _controller.selection = TextSelection.collapsed(offset: clampedStart);
-      }
-    }
+    final text = _selectedText;
+    if (text == null) return;
+    _sendToClipboard(text);
+    _deleteSelection();
   }
 
-  void _paste() {
-    // Paste text from clipboard
-    var clipboardText = ClipboardManager.paste();
-    if (clipboardText != null && clipboardText.isNotEmpty) {
-      if (component.maxLines == 1) {
-        // Single-line field: replace all newlines/carriage returns with spaces
-        // This prevents accidentally submitting the form when pasting multi-line text
-        clipboardText = clipboardText.replaceAll(RegExp(r'[\r\n]+'), ' ');
-      } else {
-        // Multi-line field: preserve newlines but normalize to \n only
-        // Replace Windows-style \r\n and old Mac-style \r with Unix-style \n
-        // Note: Pasting via Ctrl+V processes the text as a single string insertion,
-        // so newlines won't trigger Enter key events or form submission
-        clipboardText = clipboardText.replaceAll(RegExp(r'\r\n'), '\n');
-        clipboardText = clipboardText.replaceAll(RegExp(r'\r'), '\n');
-      }
+  bool _handlePaste(String text) {
+    if (component.readOnly || !component.enabled) return false;
+    _pasteText(text);
+    return true;
+  }
 
-      // Call onPaste callback if provided
-      // If callback returns true, the paste was handled externally - skip default insertion
-      final handled = component.onPaste?.call(clipboardText) ?? false;
-      if (!handled) {
-        _insertText(clipboardText);
-      }
-    }
+  /// Normalizes line endings for the field's line mode, then inserts the text
+  /// unless [TextField.onPaste] claims it.
+  void _pasteText(String text) {
+    if (text.isEmpty) return;
+    final normalized = component.maxLines == 1
+        ? text.replaceAll(RegExp(r'[\r\n]+'), ' ')
+        : text.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    final handled = component.onPaste?.call(normalized) ?? false;
+    if (!handled) _insertText(normalized);
   }
 
   @override
@@ -865,8 +829,7 @@ class _TextFieldState extends State<TextField> {
     // Resolve colors from theme if not provided
     final theme = TuiTheme.of(context);
     final effectiveCursorColor = component.cursorColor ?? theme.primary;
-    final effectiveSelectionColor =
-        component.selectionColor ?? theme.primary.withOpacity(0.4);
+    final effectiveSelectionColor = component.selectionColor ?? theme.selection;
     final effectiveOnSelectionColor =
         component.onSelectionColor ?? theme.onSelection;
 
@@ -890,6 +853,7 @@ class _TextFieldState extends State<TextField> {
       obscuringCharacter: component.obscuringCharacter,
       wordNavigation: _words,
       onSelectionChange: _handleSelectionChangeFromRenderObject,
+      onSelectionDragEnd: _handleSelectionCompleted,
       onRenderObjectCreate: (renderObject) {
         _renderTextField = renderObject;
       },
@@ -916,6 +880,7 @@ class _TextFieldState extends State<TextField> {
     return Focusable(
       focused: isFocused,
       onKeyEvent: _handleKeyEvent,
+      onPaste: _handlePaste,
       child: content,
     );
   }
@@ -942,6 +907,7 @@ class _TextFieldContent extends SingleChildRenderObjectComponent {
     this.obscuringCharacter = '•',
     required this.wordNavigation,
     this.onSelectionChange,
+    this.onSelectionDragEnd,
     this.onRenderObjectCreate,
   });
 
@@ -963,6 +929,7 @@ class _TextFieldContent extends SingleChildRenderObjectComponent {
   final String obscuringCharacter;
   final WordNavigation wordNavigation;
   final void Function(TextSelection)? onSelectionChange;
+  final VoidCallback? onSelectionDragEnd;
   final void Function(RenderTextField)? onRenderObjectCreate;
 
   @override
@@ -986,6 +953,7 @@ class _TextFieldContent extends SingleChildRenderObjectComponent {
       obscuringCharacter: obscuringCharacter,
       wordNavigation: wordNavigation,
       onSelectionChange: onSelectionChange,
+      onSelectionDragEnd: onSelectionDragEnd,
     );
     onRenderObjectCreate?.call(renderObject);
     return renderObject;
@@ -1035,6 +1003,7 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
     String obscuringCharacter = '•',
     required WordNavigation wordNavigation,
     this.onSelectionChange,
+    this.onSelectionDragEnd,
   })  : _text = text,
         _placeholder = placeholder,
         _style = style,
@@ -1080,6 +1049,9 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
   // Callback for selection changes
   final void Function(TextSelection)? onSelectionChange;
 
+  /// Called when a mouse press is released over a non-collapsed selection.
+  final VoidCallback? onSelectionDragEnd;
+
   // Store the layout result for proper Unicode rendering
   TextLayoutResult? _layoutResult;
 
@@ -1093,9 +1065,7 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
   // Mouse interaction state
   MouseTrackerAnnotation? _mouseAnnotation;
   int? _dragAnchorOffset;
-  DateTime? _lastClickTime;
-  int? _lastClickOffset;
-  static const _doubleClickTimeout = Duration(milliseconds: 500);
+  final _doubleClick = DoubleClickDetector();
 
   @override
   MouseTrackerAnnotation? get annotation => _mouseAnnotation;
@@ -1442,26 +1412,14 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
       onGesture: (update) => switch (update) {
         GestureBegan(:final anchor) => _handlePointerDown(anchor),
         GestureDragged(:final position) => _handlePointerMove(position),
-        GestureEnded(:final position) => _handlePointerUp(position),
-        GestureCancelled(:final position) => _handlePointerUp(position),
+        GestureEnded() => _handlePointerUp(),
+        GestureCancelled() => _dragAnchorOffset = null,
       },
       renderObject: this,
     );
   }
 
-  Offset get _globalPaintOffset {
-    double x = 0, y = 0;
-    RenderObject? node = this;
-    while (node != null) {
-      if (node.parentData is BoxParentData) {
-        final pd = node.parentData as BoxParentData;
-        x += pd.offset.dx;
-        y += pd.offset.dy;
-      }
-      node = node.parent;
-    }
-    return Offset(x, y);
-  }
+  Offset get _globalPaintOffset => globalPaintOffsetOf(this);
 
   int _getCharIndexFromMousePosition(int mouseX, int mouseY) {
     final gpo = _globalPaintOffset;
@@ -1497,23 +1455,13 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
 
     final charIndex = _getCharIndexFromMousePosition(
         position.dx.toInt(), position.dy.toInt());
-    final now = DateTime.now();
 
-    // Double-click detection
-    if (_lastClickTime != null &&
-        _lastClickOffset != null &&
-        now.difference(_lastClickTime!) < _doubleClickTimeout &&
-        (_lastClickOffset! - charIndex).abs() <= 1) {
+    if (_doubleClick.press(position)) {
       _selectWordAt(charIndex);
-      _lastClickTime = null;
-      _lastClickOffset = null;
       _dragAnchorOffset = null;
       return;
     }
 
-    // Single click - position cursor
-    _lastClickTime = now;
-    _lastClickOffset = charIndex;
     _dragAnchorOffset = charIndex;
 
     final newSelection = TextSelection.collapsed(offset: charIndex);
@@ -1534,18 +1482,16 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
     _commitSelection(newSelection);
   }
 
-  void _handlePointerUp(Offset position) {
+  void _handlePointerUp() {
     _dragAnchorOffset = null;
+    if (!_selection.isCollapsed) onSelectionDragEnd?.call();
   }
 
   void _selectWordAt(int offset) {
     if (_text.isEmpty) return;
-    final clampedOffset = offset.clamp(0, _text.length - 1);
-    final start = _wordNavigation.wordStart(_text, clampedOffset);
-    final end = _wordNavigation.wordEnd(_text, clampedOffset);
-    _commitSelection(start == end
-        ? TextSelection.collapsed(offset: clampedOffset)
-        : TextSelection(baseOffset: start, extentOffset: end));
+    final range = WordNavigation.rangeAt(_text, offset);
+    _commitSelection(
+        TextSelection(baseOffset: range.start, extentOffset: range.end));
   }
 
   @override

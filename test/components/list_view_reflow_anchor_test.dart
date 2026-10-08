@@ -797,7 +797,6 @@ void main() {
         controller.dispose();
       }, size: _terminalSize);
     });
-
   });
 
   group('reversed reflow anchoring', () {
@@ -806,8 +805,7 @@ void main() {
     // bottom row. Layout depth d inside an item of extent E paints at row
     // E - 1 - d from the item's own top; the anchor holds content through
     // that mirror.
-    test('keeps the bottom-edge item anchored when the pane narrows',
-        () async {
+    test('keeps the bottom-edge item anchored when the pane narrows', () async {
       await testNocterm('reversed narrow anchors', (tester) async {
         final controller = ScrollController();
         final harness = _resizable(
