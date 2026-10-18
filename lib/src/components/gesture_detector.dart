@@ -292,6 +292,7 @@ class _RenderGestureDetector extends RenderMouseRegion {
       _gestureAnnotation ?? super.annotation;
 
   void _updateGestureAnnotation() {
+    _gestureAnnotation?.validForMouseTracker = false;
     _gestureAnnotation = MouseTrackerAnnotation(
       dragPolicy: DragPolicy.cancel,
       onGesture: (update) => switch (update) {

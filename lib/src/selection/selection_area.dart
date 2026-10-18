@@ -246,6 +246,7 @@ class RenderSelectionArea extends RenderMouseRegion {
       _selectionAnnotation ?? super.annotation;
 
   void _updateSelectionAnnotation() {
+    _selectionAnnotation?.validForMouseTracker = false;
     _selectionAnnotation = MouseTrackerAnnotation(
       dragPolicy: DragPolicy.capture,
       onGesture: (update) => switch (update) {

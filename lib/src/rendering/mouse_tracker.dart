@@ -150,8 +150,15 @@ class MouseTracker {
       }
     }
 
-    // Find annotations that were exited
-    final exitedAnnotations = _hoveredAnnotations.difference(newAnnotations);
+    // Settle the hovered set before any callback runs, so a callback that
+    // throws (or begins a capture) leaves the tracker describing this event,
+    // not the previous one.
+    final previousAnnotations = Set.of(_hoveredAnnotations);
+    _hoveredAnnotations
+      ..clear()
+      ..addAll(newAnnotations);
+
+    final exitedAnnotations = previousAnnotations.difference(newAnnotations);
     for (final annotation in exitedAnnotations) {
       if (annotation.validForMouseTracker) {
         annotation.onExit?.call(effectiveEvent);
@@ -159,37 +166,31 @@ class MouseTracker {
       }
     }
 
-    // Find annotations that were entered
-    final enteredAnnotations = newAnnotations.difference(_hoveredAnnotations);
+    final enteredAnnotations = newAnnotations.difference(previousAnnotations);
     for (final annotation in enteredAnnotations) {
       if (annotation.validForMouseTracker) {
         annotation.onEnter?.call(effectiveEvent);
       }
     }
 
-    // Dispatch hover events to all currently hovered annotations
     for (final annotation in newAnnotations) {
       if (annotation.validForMouseTracker) {
         annotation.onHover?.call(effectiveEvent);
         _driveGesture(annotation, effectiveEvent, inside: true);
       }
     }
-
-    // Update the set of hovered annotations.
-    if (_capturedAnnotation == null) {
-      _hoveredAnnotations.clear();
-      _hoveredAnnotations.addAll(newAnnotations);
-    }
   }
 
   /// Clear all hovered annotations (e.g., when mouse leaves the terminal).
   void clear(MouseEvent event) {
-    for (final annotation in _hoveredAnnotations) {
+    final exitedAnnotations = Set.of(_hoveredAnnotations);
+    _hoveredAnnotations.clear();
+    _pressedButtons.clear();
+    for (final annotation in exitedAnnotations) {
+      if (!annotation.validForMouseTracker) continue;
       annotation.onExit?.call(event);
       _cancelGesture(annotation, event);
     }
-    _hoveredAnnotations.clear();
-    _pressedButtons.clear();
   }
 
   /// Advances [annotation]'s gesture for one event and reports the step.

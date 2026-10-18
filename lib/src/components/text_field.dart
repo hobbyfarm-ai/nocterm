@@ -1407,6 +1407,7 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
   }
 
   void _updateMouseAnnotation() {
+    _mouseAnnotation?.validForMouseTracker = false;
     _mouseAnnotation = MouseTrackerAnnotation(
       dragPolicy: DragPolicy.capture,
       onGesture: (update) => switch (update) {

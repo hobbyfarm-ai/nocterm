@@ -59,6 +59,9 @@ class RenderMouseRegion extends RenderObject
   MouseTrackerAnnotation? get annotation => _annotation;
 
   void _updateAnnotation() {
+    // The tracker may still hold the annotation being replaced; retire it so
+    // its closures are never called again.
+    _annotation?.validForMouseTracker = false;
     if (_onEnter != null || _onExit != null || _onHover != null) {
       _annotation = MouseTrackerAnnotation(
         onEnter: _onEnter,

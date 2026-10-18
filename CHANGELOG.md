@@ -1,6 +1,7 @@
 # 0.8.0
 
 ## Bug Fixes
+- **Mouse tracker**: Retire a `MouseRegion`/`GestureDetector`/`TextField`/`SelectionArea` annotation when its callbacks are replaced, and settle the hovered set before dispatching, so a region rebuilt while hovered and then unmounted no longer calls into a disposed `State` and wedges the mouse
 - **IME composition (Windows/CJK)**: Emit each rendered frame in a single pipe write so the terminal never anchors the IME composition window to a transient streaming cell — fixes IME window flickering across the screen during chat/log streaming
 - **IME cursor**: Stabilize IME cursor position to prevent Chinese input flickering
 - **TextField cursor**: Correct cursor position with multiple consecutive newlines
