@@ -1524,6 +1524,7 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
       textAlign: _textAlign,
       maxLines: _maxLines == 1 ? 1 : null,
       maxWidth: maxWidth,
+      hangWhitespace: false,
     );
 
     _layoutResult = TextLayoutEngine.layout(textToLayout, config);

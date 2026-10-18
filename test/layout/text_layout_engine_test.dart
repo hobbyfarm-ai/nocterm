@@ -332,5 +332,44 @@ void main() {
         expect(result.actualHeight, 3);
       });
     });
+
+    group('Whitespace at a soft break', () {
+      test('hangs a space that does not fit at the end of its line', () {
+        final result = TextLayoutEngine.layout(
+          'hello world again',
+          const TextLayoutConfig(maxWidth: 11),
+        );
+
+        expect(result.lines, ['hello world ', 'again']);
+        expect(result.lines.join(), 'hello world again');
+        expect(result.actualWidth, 11);
+        expect(result.didOverflowWidth, isFalse);
+      });
+
+      test('hangs every space that does not fit', () {
+        final result = TextLayoutEngine.layout(
+          'hello  world',
+          const TextLayoutConfig(maxWidth: 5),
+        );
+
+        expect(result.lines, ['hello  ', 'world']);
+      });
+
+      test('starts the next line with the space when told not to hang', () {
+        final result = TextLayoutEngine.layout(
+          'hello world again',
+          const TextLayoutConfig(maxWidth: 11, hangWhitespace: false),
+        );
+
+        expect(result.lines, ['hello world', ' again']);
+      });
+
+      test('withoutHang trims only whitespace past the width', () {
+        expect(TextLayoutEngine.withoutHang('hello world ', 11), 'hello world');
+        expect(TextLayoutEngine.withoutHang('hello ', 11), 'hello ');
+        expect(
+            TextLayoutEngine.withoutHang('hello world!', 11), 'hello world!');
+      });
+    });
   });
 }

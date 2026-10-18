@@ -100,7 +100,10 @@ class RenderParagraph extends RenderObject
     _layoutResult = TextLayoutEngine.layout(plainText, config);
 
     // Now map the styled segments to the laid out lines
-    _styledLines = _mapSegmentsToLines(_segments, _layoutResult!.lines);
+    _styledLines = [
+      for (final line in _mapSegmentsToLines(_segments, _layoutResult!.lines))
+        _withoutHang(line, maxWidth),
+    ];
 
     size = constraints.constrain(Size(
       _layoutResult!.actualWidth.toDouble(),
@@ -247,6 +250,32 @@ class RenderParagraph extends RenderObject
         }
       }
     }
+  }
+
+  /// [segments] without the trailing whitespace the layout hung past
+  /// [maxWidth].
+  static List<StyledTextSegment> _withoutHang(
+    List<StyledTextSegment> segments,
+    int maxWidth,
+  ) {
+    if (segments.isEmpty ||
+        segments.last.text.characters.last.trim().isNotEmpty) {
+      return segments;
+    }
+    final line = segments.map((segment) => segment.text).join();
+    final visible = TextLayoutEngine.withoutHang(line, maxWidth);
+    if (visible.length == line.length) return segments;
+    final trimmed = <StyledTextSegment>[];
+    var left = visible.length;
+    for (final segment in segments) {
+      if (left <= 0) break;
+      final text = segment.text.length <= left
+          ? segment.text
+          : segment.text.substring(0, left);
+      trimmed.add(StyledTextSegment(text, segment.style));
+      left -= text.length;
+    }
+    return trimmed;
   }
 
   /// Paints a line with styled segments and selection highlighting.

@@ -238,5 +238,58 @@ void main() {
         debugPrintAfterPump: true,
       );
     });
+
+    test('never starts a wrapped line with the space it broke at', () async {
+      await testNocterm(
+        'wrapped at an exact fit',
+        size: const Size(11, 3),
+        (tester) async {
+          await tester.pumpComponent(
+            RichText(
+              text: const TextSpan(
+                children: [
+                  TextSpan(text: 'hello '),
+                  TextSpan(
+                    text: 'world',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  TextSpan(text: ' again'),
+                  TextSpan(
+                    text: ' more',
+                    style: TextStyle(color: Colors.red),
+                  ),
+                ],
+              ),
+            ),
+          );
+
+          final rows = tester.terminalState.getText().split('\n');
+          expect(rows[0], 'hello world');
+          expect(rows[1].trimRight(), 'again more');
+          expect(
+            tester.terminalState.getCellAt(6, 1)!.style.color,
+            Colors.red,
+          );
+          expect(
+            tester.terminalState.getCellAt(6, 0)!.style.fontWeight,
+            FontWeight.bold,
+          );
+        },
+      );
+    });
+
+    test('never starts a wrapped plain text line with a space', () async {
+      await testNocterm(
+        'plain text exact fit',
+        size: const Size(11, 3),
+        (tester) async {
+          await tester.pumpComponent(const Text('hello world again'));
+
+          final rows = tester.terminalState.getText().split('\n');
+          expect(rows[0], 'hello world');
+          expect(rows[1].trimRight(), 'again');
+        },
+      );
+    });
   });
 }

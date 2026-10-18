@@ -1,4 +1,5 @@
 import 'package:characters/characters.dart';
+
 import '../utils/unicode_width.dart';
 
 /// How overflowing text should be handled
@@ -36,12 +37,17 @@ class TextLayoutConfig {
   final int? maxLines;
   final int maxWidth;
 
+  /// Whether spaces that don't fit at a soft break stay at the end of their
+  /// line instead of starting the next one.
+  final bool hangWhitespace;
+
   const TextLayoutConfig({
     this.softWrap = true,
     this.overflow = TextOverflow.clip,
     this.textAlign = TextAlign.left,
     this.maxLines,
     required this.maxWidth,
+    this.hangWhitespace = true,
   });
 }
 
@@ -118,7 +124,11 @@ class TextLayoutEngine {
         continue;
       }
 
-      final lines = _wrapParagraph(paragraph, config.maxWidth);
+      final lines = _wrapParagraph(
+        paragraph,
+        config.maxWidth,
+        hangWhitespace: config.hangWhitespace,
+      );
       wrappedLines.addAll(lines);
     }
 
@@ -136,9 +146,10 @@ class TextLayoutEngine {
       }
     }
 
-    // Calculate actual width
+    // Calculate actual width, leaving out whitespace hung past the edge
     final actualWidth = finalLines.fold(0, (max, line) {
-      final width = UnicodeWidth.stringWidth(line);
+      final width =
+          UnicodeWidth.stringWidth(withoutHang(line, config.maxWidth));
       return width > max ? width : max;
     });
 
@@ -152,7 +163,11 @@ class TextLayoutEngine {
   }
 
   /// Wrap a single paragraph into multiple lines
-  static List<String> _wrapParagraph(String paragraph, int maxWidth) {
+  static List<String> _wrapParagraph(
+    String paragraph,
+    int maxWidth, {
+    required bool hangWhitespace,
+  }) {
     final List<String> lines = [];
     final words = _splitIntoWords(paragraph);
 
@@ -180,6 +195,9 @@ class TextLayoutEngine {
         // Word fits on current line
         currentLine += word;
         currentLineWidth += wordWidth;
+      } else if (hangWhitespace && word.trim().isEmpty) {
+        // A space at the break hangs off the end of the line
+        currentLine += word;
       } else {
         // Word doesn't fit - start new line
         lines.add(currentLine);
@@ -205,6 +223,18 @@ class TextLayoutEngine {
     }
 
     return lines;
+  }
+
+  /// [line] without the trailing whitespace hung past [maxWidth], so it can
+  /// be measured and painted within its box.
+  static String withoutHang(String line, int maxWidth) {
+    var visible = line;
+    while (UnicodeWidth.stringWidth(visible) > maxWidth &&
+        visible.isNotEmpty &&
+        visible.characters.last.trim().isEmpty) {
+      visible = visible.characters.skipLast(1).string;
+    }
+    return visible;
   }
 
   /// Split text into words, preserving spaces and considering break opportunities

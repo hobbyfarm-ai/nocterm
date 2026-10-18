@@ -124,7 +124,7 @@ class RenderText extends RenderObject
     final style = _style;
 
     for (int i = 0; i < lines.length; i++) {
-      final line = lines[i];
+      final line = TextLayoutEngine.withoutHang(lines[i], alignmentWidth);
 
       // Check if this is the last line of a paragraph for justification
       bool isLastLine = i == lines.length - 1;
