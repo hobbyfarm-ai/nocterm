@@ -152,6 +152,9 @@ abstract class Element implements BuildContext {
         }
         newChild = child;
       } else if (Component.canUpdate(child.component, newComponent)) {
+        if (child.slot != newSlot) {
+          updateSlotForChild(child, newSlot);
+        }
         child.update(newComponent);
         newChild = child;
       } else {
