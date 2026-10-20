@@ -1,9 +1,6 @@
 import 'package:nocterm/nocterm.dart';
 import 'package:nocterm/src/navigation/render_theater.dart';
 
-import '../rendering/mouse_hit_test.dart';
-import '../rendering/mouse_tracker.dart';
-
 /// Routes mouse events through the component tree: wheel events to
 /// scrollables, and hit-test results to the [MouseTracker] annotations.
 ///

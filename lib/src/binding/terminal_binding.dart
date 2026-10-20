@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:nocterm/nocterm.dart';
-import 'package:nocterm/src/framework/terminal_canvas.dart';
 import 'package:nocterm/src/image/image_cleanup.dart';
 import 'package:nocterm/src/navigation/render_theater.dart';
 
@@ -11,7 +10,6 @@ import '../buffer.dart' as buf;
 import '../keyboard/input_event.dart';
 import '../keyboard/input_parser.dart';
 import '../keyboard/osc_scanner.dart';
-import '../rendering/mouse_tracker.dart';
 import 'hot_reload_mixin.dart';
 import 'mouse_router.dart';
 
@@ -1250,16 +1248,16 @@ class TerminalBinding extends NoctermBinding
     }
   }
 
-  /// Find the focused [RenderTextField] by walking the element tree.
+  /// Find the focused [ImeCursorAnchor] by walking the element tree.
   ///
   /// Looks for a [FocusableElement] whose [Focusable] component has
-  /// `focused == true` and which contains a [RenderTextField] in its
+  /// `focused == true` and which contains an [ImeCursorAnchor] in its
   /// subtree. Returns `null` if no focused text field is found.
-  RenderTextField? _findFocusedRenderTextField() {
+  ImeCursorAnchor? _findFocusedImeCursorAnchor() {
     if (rootElement == null) return null;
 
     // Walk the tree looking for a FocusableElement with focused == true
-    // that contains a RenderTextField
+    // that contains an ImeCursorAnchor
     FocusableElement? focusedElement;
     void findFocused(Element element) {
       if (focusedElement != null) return;
@@ -1273,13 +1271,13 @@ class TerminalBinding extends NoctermBinding
     findFocused(rootElement!);
     if (focusedElement == null) return null;
 
-    // Now find the RenderTextField inside the focused element's subtree
-    RenderTextField? result;
+    // Now find the ImeCursorAnchor inside the focused element's subtree
+    ImeCursorAnchor? result;
     void findTextField(Element element) {
       if (result != null) return;
       if (element is RenderObjectElement &&
-          element.renderObject is RenderTextField) {
-        result = element.renderObject as RenderTextField;
+          element.renderObject is ImeCursorAnchor) {
+        result = element.renderObject as ImeCursorAnchor;
         return;
       }
       element.visitChildren(findTextField);
@@ -1304,7 +1302,7 @@ class TerminalBinding extends NoctermBinding
   /// is focused so that terminal emulators that require a visible cursor
   /// for IME positioning work correctly.
   void _positionImeCursor() {
-    final renderTextField = _findFocusedRenderTextField();
+    final renderTextField = _findFocusedImeCursorAnchor();
     if (renderTextField == null) {
       // No focused text field – hide the terminal cursor (normal TUI mode).
       if (_imeCursorVisible) {

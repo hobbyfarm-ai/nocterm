@@ -3,9 +3,6 @@ import 'dart:math' as math;
 
 import 'package:characters/characters.dart';
 import 'package:nocterm/nocterm.dart' hide TextAlign;
-import 'package:nocterm/src/framework/terminal_canvas.dart';
-import '../rendering/mouse_hit_test.dart';
-import '../rendering/mouse_tracker.dart';
 import '../text/text_layout_engine.dart';
 import '../text/selection_utils.dart' as selection_utils;
 import 'text_field/cursor_movement.dart';
@@ -983,7 +980,9 @@ class _TextFieldContent extends SingleChildRenderObjectComponent {
 }
 
 /// Render object for text field
-class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
+class RenderTextField extends RenderObject
+    with MouseTrackerAnnotationProvider
+    implements ImeCursorAnchor {
   RenderTextField({
     required String text,
     String? placeholder,
@@ -1301,6 +1300,7 @@ class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
   ///
   /// The position is returned even when the cursor is in its blink-off phase
   /// so the IME window stays anchored at the correct location.
+  @override
   Offset? getImeCursorPosition() {
     if (!_isFocused || _layoutResult == null) {
       return null;

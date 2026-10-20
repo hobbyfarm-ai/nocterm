@@ -2,7 +2,6 @@ import 'dart:math' as math;
 
 import 'package:meta/meta.dart';
 import 'package:nocterm/nocterm.dart';
-import 'package:nocterm/src/framework/terminal_canvas.dart';
 
 /// Computes which cells of an indeterminate progress bar of [width] cells are
 /// lit when the band's leading edge sits at [position].
