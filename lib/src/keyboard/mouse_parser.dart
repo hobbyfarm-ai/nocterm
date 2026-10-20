@@ -1,3 +1,4 @@
+import 'keyboard_event.dart';
 import 'mouse_event.dart';
 
 /// Parses mouse escape sequences from terminal input
@@ -37,10 +38,13 @@ class MouseParser {
     final parts = params.split(';');
     if (parts.length != 3) return null;
 
-    final buttonCode = int.tryParse(parts[0]);
+    final rawCode = int.tryParse(parts[0]);
     final rawX = int.tryParse(parts[1]);
     final rawY = int.tryParse(parts[2]);
-    if (buttonCode == null || rawX == null || rawY == null) return null;
+    if (rawCode == null || rawX == null || rawY == null) return null;
+
+    final modifiers = _modifiersOf(rawCode);
+    final buttonCode = rawCode & ~_modifierBits;
 
     final x = rawX - 1; // Convert to 0-based
     final y = rawY - 1;
@@ -50,8 +54,9 @@ class MouseParser {
 
     // In SGR mode:
     // Bits 0-1: button number (0=left, 1=middle, 2=right, 3=release/none)
+    // Bits 2-4: modifiers (4=Shift, 8=Meta, 16=Control), already removed
     // Bit 5 (32): motion/drag flag
-    // Bit 6 (64): shift for wheel (64=up, 65=down)
+    // Bit 6 (64): wheel (64=up, 65=down)
 
     // Check for wheel events first (64 and 65)
     if (buttonCode == 64) {
@@ -91,8 +96,18 @@ class MouseParser {
       y: y,
       pressed: effectivePressed,
       isMotion: isMotionEvent,
+      modifiers: modifiers,
     );
   }
+
+  /// Bits 2-4 of a button code, the modifiers held when it was reported.
+  static const _modifierBits = 4 | 8 | 16;
+
+  static ModifierKeys _modifiersOf(int buttonCode) => ModifierKeys(
+        shift: buttonCode & 4 != 0,
+        alt: buttonCode & 8 != 0,
+        ctrl: buttonCode & 16 != 0,
+      );
 
   /// Parse X10 mouse sequence (ESC [ M button x y)
   /// Legacy format, still used by some terminals
@@ -111,7 +126,8 @@ class MouseParser {
   /// Decode an X10 mouse event from its three raw payload bytes.
   static MouseEvent? decodeX10(int buttonRaw, int xRaw, int yRaw) {
     // X10 encoding: button and coordinates are offset by 32
-    final buttonByte = buttonRaw - 32;
+    final modifiers = _modifiersOf(buttonRaw - 32);
+    final buttonByte = (buttonRaw - 32) & ~_modifierBits;
     final x = xRaw - 33; // -32 for encoding, -1 for 0-based
     final y = yRaw - 33;
 
@@ -164,6 +180,7 @@ class MouseParser {
       x: x,
       y: y,
       pressed: pressed,
+      modifiers: modifiers,
     );
   }
 }

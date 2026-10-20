@@ -1,3 +1,5 @@
+import 'keyboard_event.dart';
+
 /// Mouse button types
 enum MouseButton {
   left,
@@ -10,6 +12,9 @@ enum MouseButton {
 /// Mouse event for terminal interactions
 class MouseEvent {
   final MouseButton button;
+
+  /// The modifier keys held when the terminal reported the event.
+  final ModifierKeys modifiers;
   final int x; // Column position (0-based)
   final int y; // Row position (0-based)
   final bool pressed; // true for press, false for release
@@ -30,6 +35,7 @@ class MouseEvent {
     this.isMotion = false,
     this.buttons = const {},
     this.startsPress = false,
+    this.modifiers = const ModifierKeys(),
   });
 
   /// Whether the primary (left) button is currently held down.
@@ -37,5 +43,5 @@ class MouseEvent {
 
   @override
   String toString() =>
-      'MouseEvent($button at $x,$y pressed=$pressed${isMotion ? ' (motion)' : ''}${buttons.isNotEmpty ? ' buttons=$buttons' : ''})';
+      'MouseEvent($button at $x,$y pressed=$pressed${isMotion ? ' (motion)' : ''}${buttons.isNotEmpty ? ' buttons=$buttons' : ''}${modifiers.hasAnyModifier ? ' modifiers=$modifiers' : ''})';
 }

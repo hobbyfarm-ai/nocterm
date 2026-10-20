@@ -1,4 +1,5 @@
 import '../framework/framework.dart';
+import '../keyboard/keyboard_event.dart';
 
 /// What becomes of a gesture when the pointer leaves while still held.
 enum DragPolicy {
@@ -26,7 +27,13 @@ sealed class GestureUpdate {
 
 /// The button went down on this annotation.
 final class GestureBegan extends GestureUpdate {
-  const GestureBegan({required super.anchor}) : super(position: anchor);
+  const GestureBegan({
+    required super.anchor,
+    this.modifiers = const ModifierKeys(),
+  }) : super(position: anchor);
+
+  /// The modifier keys held as the button went down.
+  final ModifierKeys modifiers;
 }
 
 /// The pointer moved while held, having left [anchor].

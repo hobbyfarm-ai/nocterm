@@ -216,7 +216,7 @@ class MouseTracker {
       if (inside && event.startsPress) {
         annotation._gestureAnchor = position;
         annotation._gestureDragging = false;
-        onGesture(GestureBegan(anchor: position));
+        onGesture(GestureBegan(anchor: position, modifiers: event.modifiers));
       }
       return;
     }
@@ -322,6 +322,7 @@ class MouseTracker {
       isMotion: event.isMotion,
       buttons: Set<MouseButton>.of(_pressedButtons),
       startsPress: startsPress,
+      modifiers: event.modifiers,
     );
   }
 }
