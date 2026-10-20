@@ -1,68 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:nocterm/nocterm.dart';
 import 'package:nocterm/src/backend/terminal.dart' as term;
+import 'fake_backend.dart';
 import 'package:test/test.dart' hide isEmpty, isNotEmpty;
-
-class _FakeBackend implements TerminalBackend {
-  @override
-  Future<void> drainOutput([
-    Duration timeout = const Duration(seconds: 1),
-  ]) async {}
-
-  bool inFlight = false;
-  final drainedController = StreamController<void>.broadcast();
-  final writes = <Uint8List>[];
-
-  @override
-  bool get isWriteInFlight => inFlight;
-
-  @override
-  Stream<void>? get writeDrainedStream => drainedController.stream;
-
-  @override
-  void writeRaw(String data) {}
-
-  @override
-  void writeRawBytes(Uint8List bytes) {
-    writes.add(bytes);
-  }
-
-  @override
-  Size getSize() => const Size(20, 5);
-
-  @override
-  bool get supportsSize => true;
-
-  @override
-  Stream<List<int>>? get inputStream => null;
-
-  @override
-  Stream<Size>? get resizeStream => null;
-
-  @override
-  Stream<void>? get shutdownStream => null;
-
-  @override
-  void enableRawMode() {}
-
-  @override
-  void disableRawMode() {}
-
-  @override
-  bool get isAvailable => true;
-
-  @override
-  void notifySizeChanged(Size newSize) {}
-
-  @override
-  void requestExit([int exitCode = 0]) {}
-
-  @override
-  void dispose() {}
-}
 
 class _Harness extends StatefulComponent {
   const _Harness();
@@ -94,11 +36,11 @@ void main() {
   group('TerminalBinding write backpressure', () {
     // Service extensions register once per isolate, so the binding is
     // shared across the group; the fake backend resets between tests.
-    late _FakeBackend backend;
+    late FakeBackend backend;
 
     setUpAll(() {
       NoctermBinding.resetInstance();
-      backend = _FakeBackend();
+      backend = FakeBackend(size: const Size(20, 5));
       TerminalBinding(term.Terminal(backend))
         ..enableFrameRateLimiting = false
         ..attachRootComponent(const _Harness());
@@ -111,7 +53,7 @@ void main() {
 
     tearDownAll(() async {
       await _settle();
-      await backend.drainedController.close();
+      await backend.drained.close();
       NoctermBinding.resetInstance();
     });
 
@@ -131,7 +73,7 @@ void main() {
           reason: 'frames must not render while the backend is draining');
 
       backend.inFlight = false;
-      backend.drainedController.add(null);
+      backend.drained.add(null);
       await _settle();
       expect(backend.writes.length, 2,
           reason: 'one catch-up frame renders the coalesced state');
@@ -143,7 +85,7 @@ void main() {
       await _settle();
       expect(backend.writes.length, 1);
 
-      backend.drainedController.add(null);
+      backend.drained.add(null);
       await _settle();
       expect(backend.writes.length, 1);
     });

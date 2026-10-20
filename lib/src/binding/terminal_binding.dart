@@ -508,9 +508,10 @@ class TerminalBinding extends NoctermBinding
             !keyEvent.isAltPressed &&
             !keyEvent.isMetaPressed;
 
-        if (isPrintable) {
-          // Add to batch
-          charBuffer.write(keyEvent.character);
+        // A line feed inside one read is a newline in the pasted text
+        final isNewline = keyEvent.matches(LogicalKey.keyJ, ctrl: true);
+        if (isPrintable || isNewline) {
+          charBuffer.write(isNewline ? '\n' : keyEvent.character);
         } else {
           // Non-printable key (arrow, enter, ctrl+x, etc.) - flush buffer first
           flushCharBuffer();

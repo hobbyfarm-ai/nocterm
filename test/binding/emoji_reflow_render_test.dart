@@ -4,60 +4,8 @@ import 'dart:typed_data';
 
 import 'package:nocterm/nocterm.dart';
 import 'package:nocterm/src/backend/terminal.dart' as term;
+import 'fake_backend.dart';
 import 'package:test/test.dart' hide isEmpty, isNotEmpty;
-
-class _FakeBackend implements TerminalBackend {
-  final writes = <Uint8List>[];
-
-  @override
-  void writeRawBytes(Uint8List bytes) => writes.add(bytes);
-
-  @override
-  void writeRaw(String data) {}
-
-  @override
-  Future<void> drainOutput(
-      [Duration timeout = const Duration(seconds: 1)]) async {}
-
-  @override
-  bool get isWriteInFlight => false;
-
-  @override
-  Stream<void>? get writeDrainedStream => null;
-
-  @override
-  Size getSize() => const Size(20, 3);
-
-  @override
-  bool get supportsSize => true;
-
-  @override
-  Stream<List<int>>? get inputStream => null;
-
-  @override
-  Stream<Size>? get resizeStream => null;
-
-  @override
-  Stream<void>? get shutdownStream => null;
-
-  @override
-  void enableRawMode() {}
-
-  @override
-  void disableRawMode() {}
-
-  @override
-  bool get isAvailable => true;
-
-  @override
-  void notifySizeChanged(Size newSize) {}
-
-  @override
-  void requestExit([int exitCode = 0]) {}
-
-  @override
-  void dispose() {}
-}
 
 class _Harness extends StatefulComponent {
   const _Harness();
@@ -90,11 +38,11 @@ String _decode(List<Uint8List> writes) =>
 
 void main() {
   group('emoji-safe rendering', () {
-    late _FakeBackend backend;
+    late FakeBackend backend;
 
     setUpAll(() {
       NoctermBinding.resetInstance();
-      backend = _FakeBackend();
+      backend = FakeBackend(size: const Size(20, 3));
       TerminalBinding(term.Terminal(backend))
         ..enableFrameRateLimiting = false
         ..attachRootComponent(const _Harness());
