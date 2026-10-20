@@ -159,7 +159,7 @@ List<KeyCase> buildMatrix() {
 
   // Ctrl + letters, minus the bytes that double as Tab/Enter/Backspace.
   for (var b = 0x01; b <= 0x1a; b++) {
-    if (b == 0x08 || b == 0x09 || b == 0x0a || b == 0x0d) continue;
+    if (b == 0x08 || b == 0x09 || b == 0x0d) continue;
     final letter = String.fromCharCode(b + 0x40).toLowerCase();
     cases.add(KeyCase('Ctrl+$letter', [b], LogicalKey.fromCharacter(letter)!,
         modifiers: const ModifierKeys(ctrl: true)));
@@ -167,7 +167,6 @@ List<KeyCase> buildMatrix() {
   cases.addAll([
     const KeyCase('TAB', [0x09], LogicalKey.tab, character: '\t'),
     const KeyCase('CR', [0x0d], LogicalKey.enter, character: '\n'),
-    const KeyCase('LF', [0x0a], LogicalKey.enter, character: '\n'),
     const KeyCase('BS', [0x08], LogicalKey.backspace),
     const KeyCase('DEL', [0x7f], LogicalKey.backspace),
     const KeyCase('FS', [0x1c], LogicalKey.backslash,

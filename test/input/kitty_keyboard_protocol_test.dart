@@ -448,13 +448,12 @@ void main() {
       expect(event.modifiers.ctrl, isTrue);
     });
 
-    test('0x0A (LF) is parsed as Enter for terminal compatibility', () {
+    test('0x0A (LF) is parsed as Ctrl+J, matching the kitty sequence', () {
       parser.clear();
       final event = parser.parseBytes([0x0A]);
-      expect(event!.logicalKey, equals(LogicalKey.enter));
-      expect(event.modifiers.hasAnyModifier, isFalse);
-      // Some terminals (e.g. Warp) send 0x0A for Enter.
-      // With kitty protocol active, Ctrl+J arrives as \x1b[106;5u instead.
+      expect(event!.logicalKey, equals(LogicalKey.keyJ));
+      expect(event.modifiers.ctrl, isTrue);
+      expect(event.character, isNull);
     });
 
     test('F5 (ESC[15~) still works and is not confused with modifyOtherKeys',

@@ -127,11 +127,11 @@ class InputParser {
       return;
     }
 
-    // Enter/Return - 0x0D (CR) and 0x0A (LF).
-    // In raw mode most terminals send 0x0D for Enter, but some (e.g. Warp)
-    // may send 0x0A. When the kitty keyboard protocol is active, Ctrl+J
-    // arrives as a kitty CSI sequence instead, so this doesn't interfere.
-    if (b == 0x0D || b == 0x0A) {
+    // Enter is 0x0D (CR). 0x0A (LF) is what a terminal without the kitty
+    // protocol sends for Ctrl+J, and some send it for Shift+Enter, so it
+    // stays a control character and a newline chord remains distinct from
+    // Enter.
+    if (b == 0x0D) {
       _emitKey(KeyboardEvent(
         logicalKey: LogicalKey.enter,
         character: '\n',

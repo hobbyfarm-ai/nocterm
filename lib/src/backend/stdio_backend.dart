@@ -52,11 +52,84 @@ _DartTcflush? _resolveTcflush() {
 // Value differs between BSDs and Linux — macOS uses 1, Linux uses 0.
 int get _tciflush => Platform.isMacOS ? 1 : 0;
 
+typedef _NativeTcgetattr = Int32 Function(Int32 fd, Pointer<Uint8> termios);
+typedef _DartTcgetattr = int Function(int fd, Pointer<Uint8> termios);
+typedef _NativeTcsetattr = Int32 Function(
+    Int32 fd, Int32 actions, Pointer<Uint8> termios);
+typedef _DartTcsetattr = int Function(
+    int fd, int actions, Pointer<Uint8> termios);
+
+/// The input flags the line discipline applies to stdin before a byte
+/// reaches the parser. Dart's raw mode leaves them on: ICRNL turns the CR
+/// that Enter sends into LF, so Enter and Ctrl+J would arrive as the same
+/// byte, and IXON takes Ctrl+S and Ctrl+Q as flow control.
+final class _InputFlags {
+  _InputFlags()
+      : _tcgetattr = _resolve(
+          (libc) => libc
+              .lookupFunction<_NativeTcgetattr, _DartTcgetattr>('tcgetattr'),
+        ),
+        _tcsetattr = _resolve(
+          (libc) => libc
+              .lookupFunction<_NativeTcsetattr, _DartTcsetattr>('tcsetattr'),
+        );
+
+  final _DartTcgetattr? _tcgetattr;
+  final _DartTcsetattr? _tcsetattr;
+  int? _original;
+
+  // Room for struct termios on every supported libc; the input flags are
+  // its first field on all of them and fit in its low 32 bits.
+  static const _termiosBytes = 256;
+  static const _icrnl = 0x100;
+  static int get _ixon => Platform.isMacOS ? 0x200 : 0x400;
+
+  static T? _resolve<T extends Function>(T Function(DynamicLibrary) find) {
+    if (Platform.isWindows) return null;
+    try {
+      return find(DynamicLibrary.process());
+    } on Object {
+      return null;
+    }
+  }
+
+  /// Stops the line discipline translating Enter and taking flow-control
+  /// keys, remembering the flags as they were.
+  void disableTranslation() => _update((flags) {
+        _original ??= flags;
+        return flags & ~(_icrnl | _ixon);
+      });
+
+  /// Puts the flags back as they were before [disableTranslation].
+  void restore() {
+    final original = _original;
+    if (original == null) return;
+    _original = null;
+    _update((_) => original);
+  }
+
+  void _update(int Function(int flags) change) {
+    final tcgetattr = _tcgetattr;
+    final tcsetattr = _tcsetattr;
+    if (tcgetattr == null || tcsetattr == null) return;
+    final termios = calloc<Uint8>(_termiosBytes);
+    try {
+      if (tcgetattr(0, termios) != 0) return;
+      final flags = termios.cast<Uint32>();
+      flags.value = change(flags.value);
+      tcsetattr(0, 0, termios);
+    } finally {
+      calloc.free(termios);
+    }
+  }
+}
+
 /// Backend for native terminal I/O via stdin/stdout.
 /// Handles Unix signals (SIGWINCH, SIGINT, SIGTERM) for resize and shutdown.
 /// On Windows, uses polling for resize detection, SIGINT for Ctrl+C,
 /// and Win32AnsiStdin for proper keyboard input (arrow keys, etc.).
 class StdioBackend implements TerminalBackend {
+  final _inputFlags = _InputFlags();
   StreamController<Size>? _resizeController;
   StreamController<void>? _shutdownController;
   StreamSubscription? _sigwinchSubscription;
@@ -234,6 +307,7 @@ class StdioBackend implements TerminalBackend {
       if (stdin.hasTerminal) {
         stdin.echoMode = false;
         stdin.lineMode = false;
+        _inputFlags.disableTranslation();
         // Discard any bytes that landed in the kernel's input queue while
         // stdin was still in cooked mode.
         final tcflush = _libcTcflush;
@@ -250,6 +324,7 @@ class StdioBackend implements TerminalBackend {
   void disableRawMode() {
     try {
       if (stdin.hasTerminal) {
+        _inputFlags.restore();
         stdin.echoMode = true;
         stdin.lineMode = true;
       }

@@ -1,7 +1,5 @@
 import 'package:nocterm/nocterm.dart';
 import 'package:nocterm/src/keyboard/mouse_parser.dart';
-import 'package:nocterm/src/rendering/mouse_hit_test.dart';
-import 'package:nocterm/src/rendering/mouse_tracker.dart';
 import 'package:test/test.dart';
 
 /// Leaf render object that reports every gesture step on its whole area.
