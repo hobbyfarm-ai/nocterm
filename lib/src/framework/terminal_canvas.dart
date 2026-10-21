@@ -7,6 +7,7 @@ import 'package:nocterm/src/rectangle.dart';
 
 import '../buffer.dart';
 import '../style.dart';
+import '../terminal_cursor.dart';
 import '../utils/unicode_width.dart';
 import 'framework.dart';
 
@@ -291,6 +292,24 @@ class TerminalCanvas {
         style: finalStyle,
       ),
     );
+  }
+
+  /// Asks the frame to show the terminal cursor at [position], in local
+  /// coordinates. A position outside this canvas's area is dropped, so a
+  /// cursor a parent clipped or scrolled away stays hidden. The last call in
+  /// a frame wins.
+  void setCursor(
+    Offset position, {
+    CursorShape shape = CursorShape.block,
+    bool blinking = true,
+  }) {
+    final x = area.left.round() + position.dx.round();
+    final y = area.top.round() + position.dy.round();
+    if (x < area.left || x >= area.right || y < area.top || y >= area.bottom) {
+      return;
+    }
+    _buffer.cursor =
+        TerminalCursor(x: x, y: y, shape: shape, blinking: blinking);
   }
 
   /// Create a clipped canvas for drawing within a sub-region

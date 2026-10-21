@@ -980,9 +980,7 @@ class _TextFieldContent extends SingleChildRenderObjectComponent {
 }
 
 /// Render object for text field
-class RenderTextField extends RenderObject
-    with MouseTrackerAnnotationProvider
-    implements ImeCursorAnchor {
+class RenderTextField extends RenderObject with MouseTrackerAnnotationProvider {
   RenderTextField({
     required String text,
     String? placeholder,
@@ -1290,69 +1288,6 @@ class RenderTextField extends RenderObject
     markNeedsPaint();
   }
 
-  /// Returns the terminal screen coordinates (column, row) of the text cursor,
-  /// or null if the cursor position cannot be determined or the field is not focused.
-  ///
-  /// This is used by the binding layer to position the physical terminal cursor
-  /// so that IME (Input Method Editor) composition windows (e.g. Chinese Pinyin)
-  /// appear at the correct location instead of flickering across the screen
-  /// during differential rendering.
-  ///
-  /// The position is returned even when the cursor is in its blink-off phase
-  /// so the IME window stays anchored at the correct location.
-  @override
-  Offset? getImeCursorPosition() {
-    if (!_isFocused || _layoutResult == null) {
-      return null;
-    }
-
-    final lines = _layoutResult!.lines;
-
-    if (_text.isEmpty && _placeholder == null) {
-      // Empty field - cursor at beginning
-      final globalOffset = _globalPaintOffset;
-      return Offset(globalOffset.dx, globalOffset.dy);
-    }
-
-    // Find which line the cursor is on (same logic as _paintCursor)
-    int charCount = 0;
-    for (int i = 0; i < lines.length; i++) {
-      final line = lines[i];
-      final lineLength = line.length;
-
-      if (charCount + lineLength >= _selection.extentOffset ||
-          i == lines.length - 1) {
-        final positionInLine =
-            (_selection.extentOffset - charCount).clamp(0, lineLength);
-
-        // Calculate visual position using Unicode width
-        final textBeforeCursor = line.substring(0, positionInLine);
-        final visualColumn = UnicodeWidth.stringWidth(textBeforeCursor);
-
-        // Combine global offset with cursor position within the field.
-        // Subtract _firstVisibleLine so the IME anchor tracks the painted
-        // caret row (see _paintCursor) when a multi-line field is scrolled.
-        final globalOffset = _globalPaintOffset;
-        return Offset(
-          globalOffset.dx + visualColumn,
-          globalOffset.dy + (i - _firstVisibleLine),
-        );
-      }
-
-      charCount += lineLength;
-      // Only add 1 for actual newline characters, not wrapped lines.
-      // Check the character right after this line's content in the
-      // original text.
-      if (i < lines.length - 1 &&
-          charCount < _text.length &&
-          _text[charCount] == '\n') {
-        charCount++;
-      }
-    }
-
-    return null;
-  }
-
   /// Recompute [_firstVisibleLine] so the cursor stays inside the viewport.
   /// Mirrors the horizontal scroll pattern in [_StatefulTextFieldState._updateViewOffset].
   /// No-op for single-line or unbounded-height fields (those don't scroll vertically).
@@ -1586,10 +1521,76 @@ class RenderTextField extends RenderObject
           i);
     }
 
-    // Paint cursor only for the focused field
-    if (_cursorVisible && _isFocused) {
-      _paintCursor(canvas, offset);
+    final caret = _isFocused ? _caret(offset) : null;
+    if (caret == null) return;
+    if (_cursorVisible) _drawCaret(canvas, caret);
+    // The terminal's own cursor follows the focused field, so an IME
+    // composition window anchors there.
+    canvas.setCursor(
+      caret.at,
+      shape: switch (_cursorStyle) {
+        CursorStyle.block || CursorStyle.blockOutline => CursorShape.block,
+        CursorStyle.underline => CursorShape.underline,
+      },
+    );
+  }
+
+  /// The caret relative to [offset] with the glyph under it, or null before
+  /// layout or while its row is scrolled out of the viewport.
+  _Caret? _caret(Offset offset) {
+    if (_layoutResult == null) return null;
+    final lines = _layoutResult!.lines;
+    if (_text.isEmpty && _placeholder == null) return _Caret(offset, ' ');
+
+    final viewportHeight = _maxLines ?? lines.length;
+    int charCount = 0;
+    for (int i = 0; i < lines.length; i++) {
+      final line = lines[i];
+      if (charCount + line.length >= _selection.extentOffset ||
+          i == lines.length - 1) {
+        if (i < _firstVisibleLine || i >= _firstVisibleLine + viewportHeight) {
+          return null;
+        }
+        final positionInLine =
+            (_selection.extentOffset - charCount).clamp(0, line.length);
+        final column =
+            UnicodeWidth.stringWidth(line.substring(0, positionInLine));
+        return _Caret(
+          offset +
+              Offset(column.toDouble(), (i - _firstVisibleLine).toDouble()),
+          positionInLine < line.length ? line[positionInLine] : ' ',
+        );
+      }
+      charCount += line.length;
+      // Only a real newline, not a wrap, takes a character.
+      if (i < lines.length - 1 &&
+          charCount < _text.length &&
+          _text[charCount] == '\n') {
+        charCount++;
+      }
     }
+    return null;
+  }
+
+  void _drawCaret(TerminalCanvas canvas, _Caret caret) {
+    final style = switch (_cursorStyle) {
+      CursorStyle.block || CursorStyle.blockOutline => _blockCursorStyle(),
+      CursorStyle.underline => TextStyle(
+          color: _style?.color ?? Colors.white,
+          backgroundColor: _style?.backgroundColor,
+          decoration: TextDecoration.underline,
+        ),
+    };
+    canvas.drawText(caret.at, caret.glyph, style: style);
+  }
+
+  /// A block that inverts the cell, or fills it with the cursor color under
+  /// whichever ink stays readable on it.
+  TextStyle _blockCursorStyle() {
+    final color = _cursorColor;
+    if (color == null) return const TextStyle(reverse: true);
+    final ink = color.computeLuminance() > 0.5 ? Colors.black : Colors.white;
+    return TextStyle(color: ink, backgroundColor: color);
   }
 
   void _paintLineWithSelection(TerminalCanvas canvas, Offset offset,
@@ -1607,122 +1608,6 @@ class RenderTextField extends RenderObject
       selection: _selectionColor ?? Colors.blue,
       onSelection: _onSelectionColor ?? Colors.white,
     );
-  }
-
-  void _paintCursor(TerminalCanvas canvas, Offset offset) {
-    if (_layoutResult == null) return;
-
-    final cursorColor = _cursorColor ?? Colors.white;
-    final lines = _layoutResult!.lines;
-
-    if (_text.isEmpty && _placeholder == null) {
-      // Empty field - show cursor at beginning
-      _drawCursorAtPosition(canvas, offset, ' ', 0, cursorColor);
-      return;
-    }
-
-    // Find which line the cursor is on
-    final viewportHeight = _maxLines ?? lines.length;
-    int charCount = 0;
-    for (int i = 0; i < lines.length; i++) {
-      final line = lines[i];
-      final lineLength = line.length;
-
-      // Check if cursor is on this line
-      if (charCount + lineLength >= _selection.extentOffset ||
-          i == lines.length - 1) {
-        // Cursor is outside the visible viewport — don't paint it.
-        if (i < _firstVisibleLine || i >= _firstVisibleLine + viewportHeight) {
-          break;
-        }
-
-        final positionInLine =
-            (_selection.extentOffset - charCount).clamp(0, lineLength);
-
-        // Calculate visual position using Unicode width
-        final textBeforeCursor = line.substring(0, positionInLine);
-        final visualColumn = UnicodeWidth.stringWidth(textBeforeCursor);
-
-        final cursorOffset = offset +
-            Offset(visualColumn.toDouble(), (i - _firstVisibleLine).toDouble());
-
-        // Get the character at cursor position (or space if at end)
-        final charAtCursor =
-            positionInLine < line.length ? line[positionInLine] : ' ';
-
-        _drawCursorAtPosition(
-            canvas, cursorOffset, charAtCursor, positionInLine, cursorColor);
-        break;
-      }
-
-      charCount += lineLength;
-      // Only add 1 for actual newline characters, not wrapped lines.
-      // The newline (if any) lives at index `charCount` — i.e. the next
-      // char to consume — not at the end of what we've already consumed,
-      // so peek forward rather than checking endsWith on the prefix.
-      if (i < lines.length - 1 &&
-          charCount < _text.length &&
-          _text[charCount] == '\n') {
-        charCount++; // Account for the newline character
-      }
-    }
-  }
-
-  void _drawCursorAtPosition(
-    TerminalCanvas canvas,
-    Offset position,
-    String charUnderCursor,
-    int cursorPos,
-    Color cursorColor,
-  ) {
-    switch (_cursorStyle) {
-      case CursorStyle.block:
-        canvas.drawText(
-          position,
-          charUnderCursor,
-          style: _blockCursorStyle(cursorColor),
-        );
-        break;
-
-      case CursorStyle.underline:
-        // Draw the character with underline decoration
-        final underlineStyle = TextStyle(
-          color: _style?.color ?? Colors.white,
-          backgroundColor: _style?.backgroundColor,
-          decoration: TextDecoration.underline,
-        );
-        canvas.drawText(position, charUnderCursor, style: underlineStyle);
-        break;
-
-      case CursorStyle.blockOutline:
-        canvas.drawText(
-          position,
-          charUnderCursor,
-          style: _blockCursorStyle(cursorColor),
-        );
-        break;
-    }
-  }
-
-  /// Picks the style for a filled-block cursor.
-  ///
-  /// When no [_cursorColor] was set explicitly, we let the terminal do the
-  /// inversion: emit only `reverse: true` so [_blendStyle] preserves the
-  /// underlying cell's fg/bg and SGR 7 swaps them at the terminal layer.
-  /// This is what "the cursor inverts the cell it's over" actually means —
-  /// the placeholder/text glyph stays visible inside the block with its
-  /// own colors flipped, instead of being clobbered by a fixed pair.
-  ///
-  /// When the caller picked an explicit color, honor it as the background
-  /// and derive the foreground from its perceived luminance so the glyph
-  /// stays readable regardless of which color was chosen.
-  TextStyle _blockCursorStyle(Color cursorColor) {
-    if (_cursorColor == null) {
-      return const TextStyle(reverse: true);
-    }
-    final fg =
-        cursorColor.computeLuminance() > 0.5 ? Colors.black : Colors.white;
-    return TextStyle(color: fg, backgroundColor: cursorColor);
   }
 }
 
@@ -1775,3 +1660,11 @@ enum CursorStyle {
 
 /// Type definitions
 typedef ValueChanged<T> = void Function(T value);
+
+/// Where the caret is drawn and what sits under it.
+class _Caret {
+  const _Caret(this.at, this.glyph);
+
+  final Offset at;
+  final String glyph;
+}

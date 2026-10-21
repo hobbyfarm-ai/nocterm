@@ -3,6 +3,7 @@ import 'package:nocterm/src/rectangle.dart';
 
 import 'style.dart';
 import 'utils/unicode_width.dart';
+import 'terminal_cursor.dart';
 
 class Cell {
   String char;
@@ -93,6 +94,9 @@ class Buffer {
   final int width;
   final int height;
   final List<List<Cell>> cells;
+
+  /// The cursor this frame shows, or null to keep it hidden.
+  TerminalCursor? cursor;
 
   /// List of sixel images to be rendered during the terminal flush phase.
   ///

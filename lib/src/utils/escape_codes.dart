@@ -1,3 +1,5 @@
+import '../terminal_cursor.dart';
+
 class EscapeCodes {
   const EscapeCodes._();
 
@@ -6,6 +8,25 @@ class EscapeCodes {
 
   static const hideCursor = '\x1b[?25l';
   static const showCursor = '\x1b[?25h';
+
+  /// Synchronized output (DEC private mode 2026): a terminal that supports
+  /// it paints everything between the two at once; others ignore them.
+  static const beginSynchronizedUpdate = '\x1b[?2026h';
+  static const endSynchronizedUpdate = '\x1b[?2026l';
+
+  /// The terminal's default cursor shape (DECSCUSR 0).
+  static const defaultCursorStyle = '\x1b[0 q';
+
+  /// DECSCUSR for [shape]: 1/2 block, 3/4 underline, 5/6 bar, odd blinking.
+  static String cursorShape(CursorShape shape, {required bool blinking}) {
+    final base = switch (shape) {
+      CursorShape.block => 1,
+      CursorShape.underline => 3,
+      CursorShape.bar => 5,
+    };
+    return '\x1b[${blinking ? base : base + 1} q';
+  }
+
   static const clearScreen = '\x1b[2J';
   static const clearLine = '\x1b[2K';
   static const moveCursorHome = '\x1b[H';

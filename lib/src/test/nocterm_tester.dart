@@ -33,6 +33,10 @@ class NoctermTester {
   }
 
   /// Get the current terminal state
+  /// The cursor the last frame asked the terminal to show, or null while
+  /// it is hidden.
+  TerminalCursor? get cursor => _binding.lastBuffer?.cursor;
+
   TerminalState get terminalState {
     final buffer = _binding.lastBuffer;
     if (buffer == null) {
