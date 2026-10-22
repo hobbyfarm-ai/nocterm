@@ -735,8 +735,8 @@ void main() {
           // velocity (rows/sec) resolves to whole rows per tick — this test
           // exercises reaching the end, not the ramp (covered by unit tests).
           var vnow = Duration.zero;
-          SelectionAutoScroller.debugClockOverride = () => vnow;
-          addTearDown(() => SelectionAutoScroller.debugClockOverride = null);
+          EdgeAutoScroller.debugClockOverride = () => vnow;
+          addTearDown(() => EdgeAutoScroller.debugClockOverride = null);
           String? completed;
           final controller = ScrollController();
 
@@ -906,8 +906,8 @@ void main() {
           // Virtual clock so one second of auto-scroll resolves to whole rows;
           // speed itself is unit-tested on SelectionAutoScroller.
           var vnow = Duration.zero;
-          SelectionAutoScroller.debugClockOverride = () => vnow;
-          addTearDown(() => SelectionAutoScroller.debugClockOverride = null);
+          EdgeAutoScroller.debugClockOverride = () => vnow;
+          addTearDown(() => EdgeAutoScroller.debugClockOverride = null);
           final controller = ScrollController();
 
           await tester.pumpComponent(
@@ -967,8 +967,8 @@ void main() {
         'edge auto-scroll stops on release',
         (tester) async {
           var vnow = Duration.zero;
-          SelectionAutoScroller.debugClockOverride = () => vnow;
-          addTearDown(() => SelectionAutoScroller.debugClockOverride = null);
+          EdgeAutoScroller.debugClockOverride = () => vnow;
+          addTearDown(() => EdgeAutoScroller.debugClockOverride = null);
           final controller = ScrollController();
 
           await tester.pumpComponent(
@@ -1020,8 +1020,8 @@ void main() {
         'edge auto-scroll suppressed at start',
         (tester) async {
           var vnow = Duration.zero;
-          SelectionAutoScroller.debugClockOverride = () => vnow;
-          addTearDown(() => SelectionAutoScroller.debugClockOverride = null);
+          EdgeAutoScroller.debugClockOverride = () => vnow;
+          addTearDown(() => EdgeAutoScroller.debugClockOverride = null);
           final controller = ScrollController();
 
           await tester.pumpComponent(

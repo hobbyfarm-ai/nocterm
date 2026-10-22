@@ -1,6 +1,8 @@
+import '../components/basic.dart' show Axis;
 import '../components/scroll_controller.dart';
 import '../framework/axis.dart';
 import '../framework/framework.dart';
+import '../rendering/edge_auto_scroller.dart';
 import 'selection.dart';
 import 'selection_container_delegate.dart';
 
@@ -30,7 +32,7 @@ class ScrollableSelectionContainerDelegate
     super.schedulePostFrame,
     Duration Function()? clock,
   })  : _controller = controller,
-        _autoScroller = SelectionAutoScroller(clock: clock) {
+        _autoScroller = EdgeAutoScroller(clock: clock) {
     _controller.addListener(_scheduleLayoutChange);
   }
 
@@ -56,11 +58,9 @@ class ScrollableSelectionContainerDelegate
   bool _selectionStartsInScrollable = false;
   bool _scheduledLayoutChange = false;
 
-  final SelectionAutoScroller _autoScroller;
+  final EdgeAutoScroller _autoScroller;
 
-  bool get _isVertical =>
-      _controller.axisDirection == AxisDirection.down ||
-      _controller.axisDirection == AxisDirection.up;
+  Axis get _axis => axisDirectionToAxis(_controller.axisDirection);
 
   /// The offset from the content origin to the top-left of the viewport.
   Offset get deltaToOrigin {
@@ -88,10 +88,7 @@ class ScrollableSelectionContainerDelegate
         _currentDragStartRelatedToOrigin == null) {
       _selectionStartsInScrollable =
           globalBounds.contains(event.globalPosition);
-      // Suppress auto-scroll for a drag that begins inside the hot band.
-      _autoScroller.arm(SelectionUtils.autoScrollVelocity(
-          globalBounds, event.globalPosition,
-          vertical: _isVertical));
+      _autoScroller.arm(globalBounds, event.globalPosition, _axis);
     }
     final delta = deltaToOrigin;
     final SelectionEdgeUpdateEvent translated;
@@ -136,24 +133,12 @@ class ScrollableSelectionContainerDelegate
     Offset globalPosition,
     SelectionResult result,
   ) {
-    final velocity = SelectionUtils.autoScrollVelocity(
-      globalBounds,
-      globalPosition,
-      vertical: _isVertical,
-    );
-    // Always step so the neutral zone resets the scroller's clock baseline.
-    final rows = _autoScroller.step(velocity);
-    if (velocity == 0 || !_autoScroller.isArmed) return result;
-    if (rows == 0) return SelectionResult.pending; // accumulating
-
-    // Never move more than one viewport per tick, so a stalled frame advances
-    // at most one screen instead of lurching to the far end.
-    final maxRows = _controller.viewportDimension.floor();
-    final scroll = rows.clamp(-maxRows, maxRows);
-    final towardContentEnd = _controller.axisDirection == AxisDirection.down ||
-        _controller.axisDirection == AxisDirection.right;
+    final rows = _autoScroller.step(globalBounds, globalPosition, _axis);
+    if (!_autoScroller.scrolling) return result;
+    if (rows == 0) return SelectionResult.pending;
+    final reversed = axisDirectionIsReversed(_controller.axisDirection);
     final before = _controller.offset;
-    _controller.scrollBy((towardContentEnd ? scroll : -scroll).toDouble());
+    _controller.scrollBy((reversed ? -rows : rows).toDouble());
     if (_controller.offset == before) return result;
     return SelectionResult.pending;
   }

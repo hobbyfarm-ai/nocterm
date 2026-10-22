@@ -327,18 +327,6 @@ mixin SelectionRegistrant on Selectable {
 
 /// Geometry helpers for handling selection events.
 abstract final class SelectionUtils {
-  /// Default auto-scroll speed, in rows per second, at the inner row of a hot
-  /// band. See [autoScrollVelocity].
-  static const double defaultMinPerSecond = 10;
-
-  /// Default auto-scroll speed, in rows per second, at the very edge row. See
-  /// [autoScrollVelocity].
-  static const double defaultMaxPerSecond = 50;
-
-  /// Default depth, in rows, of the hot band at each edge. See
-  /// [autoScrollVelocity].
-  static const double defaultHotRows = 5;
-
   /// Determines a [SelectionResult] from where [point] sits relative to
   /// [targetRect] in screen order.
   ///
@@ -358,38 +346,6 @@ abstract final class SelectionUtils {
     return point.dx >= targetRect.right
         ? SelectionResult.next
         : SelectionResult.previous;
-  }
-
-  /// The auto-scroll velocity, in rows per second, for a selection drag at
-  /// [point] relative to [bounds] — 0 in the neutral middle, ramping up inside
-  /// a hot band [hotRows] deep at each edge: [minPerSecond] at the band's inner
-  /// row, up to [maxPerSecond] at the very edge row.
-  ///
-  /// The ramp is measured *inside* the viewport, not by how far the pointer is
-  /// dragged past the edge: a terminal clamps the pointer to the grid, so a
-  /// full-height view has no room past its edge to measure against.
-  static double autoScrollVelocity(
-    Rect bounds,
-    Offset point, {
-    required bool vertical,
-    double minPerSecond = defaultMinPerSecond,
-    double maxPerSecond = defaultMaxPerSecond,
-    double hotRows = defaultHotRows,
-  }) {
-    final (position, start, end) = vertical
-        ? (point.dy, bounds.top, bounds.bottom)
-        : (point.dx, bounds.left, bounds.right);
-    // Cap the band at half the extent so a neutral row survives the middle of
-    // a tall view; a view too short for that just activates its edge rows.
-    final band = ((end - start - 1) / 2).clamp(0.0, hotRows);
-    if (band <= 0) return 0; // a viewport of one row or less has no hot band.
-    // Distance from the nearest edge row: 0 at the edge, growing inward.
-    final towardStart = position - start <= end - 1 - position;
-    final toEdge = towardStart ? position - start : end - 1 - position;
-    if (toEdge >= band) return 0;
-    final t = ((band - toEdge) / band).clamp(0.0, 1.0);
-    final speed = minPerSecond + (maxPerSecond - minPerSecond) * t;
-    return towardStart ? -speed : speed;
   }
 
   /// Moves [point] inside [targetRect] when it falls outside, so a drag past
@@ -413,70 +369,6 @@ abstract final class SelectionUtils {
     return point.dx < targetRect.left
         ? Offset(targetRect.left, point.dy)
         : Offset(targetRect.right, point.dy);
-  }
-}
-
-/// Turns an auto-scroll velocity (rows/second) into whole rows to move this
-/// frame.
-class SelectionAutoScroller {
-  SelectionAutoScroller({Duration Function()? clock})
-      : _clock = clock ?? debugClockOverride ?? _monotonicClock();
-
-  /// Test-only default clock, used when no explicit [clock] is passed. Lets
-  /// integration tests drive auto-scroll time deterministically without
-  /// threading a clock through every scrollable that builds a scroller.
-  @visibleForTesting
-  static Duration Function()? debugClockOverride;
-
-  /// A monotonic wall-clock reader; the auto-scroll rate is driven by the real
-  /// time between ticks, so a fast pointer firing many ticks can't scroll any
-  /// faster than a slow one — each tick only advances by the time it owns.
-  final Duration Function() _clock;
-  double _remainder = 0;
-  Duration? _last;
-  int _suppressedSign = 0;
-
-  static Duration Function() _monotonicClock() {
-    final stopwatch = Stopwatch()..start();
-    return () => stopwatch.elapsed;
-  }
-
-  /// Whether auto-scroll is currently allowed to move. See [arm].
-  bool get isArmed => _suppressedSign == 0;
-
-  /// Prepares the scroller for a new drag. A nonzero [startVelocity] — the drag
-  /// began inside a hot band — suppresses auto-scroll until the pointer leaves
-  /// that band.
-  void arm(double startVelocity) {
-    _suppressedSign = startVelocity.sign.toInt();
-    _remainder = 0;
-    _last = null;
-  }
-
-  /// Whole rows to move given the current [rowsPerSecond], measured against the
-  /// real time since the previous tick. A [rowsPerSecond] of 0 (the pointer is
-  /// off the edge) resets the clock, so a later return to the edge starts fresh
-  /// rather than counting the idle gap as scroll time. Returns 0 while
-  /// suppressed (see [arm]).
-  int step(double rowsPerSecond) {
-    // A neutral tick or a crossing into the opposite band re-arms.
-    if (_suppressedSign != 0 && rowsPerSecond.sign.toInt() != _suppressedSign) {
-      _suppressedSign = 0;
-    }
-    if (rowsPerSecond == 0) {
-      _remainder = 0;
-      _last = null;
-      return 0;
-    }
-    if (_suppressedSign != 0) return 0;
-    final now = _clock();
-    final elapsed = _last == null ? Duration.zero : now - _last!;
-    _last = now;
-    _remainder += rowsPerSecond *
-        (elapsed.inMicroseconds / Duration.microsecondsPerSecond);
-    final whole = _remainder.truncate();
-    _remainder -= whole;
-    return whole;
   }
 }
 

@@ -15,6 +15,18 @@ enum AxisDirection {
   left,
 }
 
+/// The axis an [AxisDirection] runs along.
+Axis axisDirectionToAxis(AxisDirection axisDirection) {
+  switch (axisDirection) {
+    case AxisDirection.up:
+    case AxisDirection.down:
+      return Axis.vertical;
+    case AxisDirection.left:
+    case AxisDirection.right:
+      return Axis.horizontal;
+  }
+}
+
 /// Returns whether the given axis direction is reversed.
 ///
 /// - [AxisDirection.up] and [AxisDirection.left] are reversed.

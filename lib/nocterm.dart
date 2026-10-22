@@ -90,6 +90,7 @@ export 'src/foundation/performance.dart';
 export 'src/foundation/nocterm_error.dart';
 export 'src/rendering/debug.dart';
 export 'src/rendering/double_click_detector.dart';
+export 'src/rendering/edge_auto_scroller.dart';
 export 'src/rendering/pointer_gesture.dart';
 export 'src/rendering/reflow_anchorable.dart';
 export 'src/rendering/scrollable_render_object.dart';
